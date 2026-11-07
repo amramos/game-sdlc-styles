@@ -12,16 +12,35 @@ edge of a wall sign). Composition, camera, cast, props, textures, dither pattern
 same. **Forward+** comes closer still (0.3 / 0.2 / 0.2; 0.5% of pixels over 8), with one change in the
 surface shader that is already in the code below.
 
-## Scene layout
+The whole project that rendered the frame, including the code that rebuilds the web demo exactly, is
+in this entry's `godot-port/` on the catalog site. This file keeps what a game needs to draw the look.
+
+## Putting it together
 
 3D renders into a `SubViewport` at 240 lines (427 × 240 at 16:9). A full-screen `TextureRect`
 shows it with nearest filtering and the dither shader. The interface is ordinary `Control` nodes in a
-`CanvasLayer` above it, at window resolution. The key-scene frame shows no interface; panels follow
-`recipe.md` (a `StyleBoxFlat` with the `panel` fill, a 2 px `ink` border, a 0–4 px radius and a
-3 px `ink` shadow offset with size 0).
+`CanvasLayer` above it, at window resolution; panels follow `recipe.md` (a `StyleBoxFlat` with the
+`panel` fill, a 2 px `ink` border, a 0–4 px radius and a 3 px `ink` shadow offset with size 0).
 
-Everything is built in code from one script on a plain `Node`. The palette, the light factors and
-the pose time below are the example's sunny afternoon; a game sets its own.
+```
+Node (main.gd)
+├─ SubViewport 427 × 240, no MSAA, no screen-space AA, no TAA
+│  ├─ Camera3D      fov 55° (KEEP_HEIGHT), near 0.05, far 300, Environment: background = fog,
+│  │                ambient off, tonemap Linear
+│  └─ world: Node3D every mesh, all with retro.gdshader (one ShaderMaterial per texture and flags)
+├─ TextureRect      full rect, nearest, shows the SubViewport through dither.gdshader
+└─ CanvasLayer      the interface, at window resolution
+```
+
+Every mesh, the imported model included, wears `retro.gdshader`: it does the vertex snap, the
+affine UVs, the per-vertex light and the fog itself, so there are no light nodes and no Environment
+fog. Lights are uniforms (`ambient`, a sun, up to six points), set on every material by
+`apply_light()`. The pass order is: the 3D scene into the SubViewport, then the dither and 5-bit cut
+as the TextureRect upscales it, then the interface.
+
+The target's width is rounded (427 px where 16:9 gives 426.67), so the shader's `aspect_fix`
+scales clip-space x by the target's aspect over the window's, as three.js does when it projects
+with the window's aspect.
 
 ```ini
 ; project.godot
@@ -35,145 +54,6 @@ renderer/rendering_method.mobile="gl_compatibility"
 anti_aliasing/quality/msaa_3d=0
 textures/canvas_textures/default_texture_filter=0
 ```
-
-```gdscript
-extends Node
-## Port of retro-low-poly/demo.html?frame=key-scene: the diner seen from a counter stool,
-## sunny-afternoon palette, every animated value posed at t = 1.3 s.
-
-const P := {
-	"ink": "#1C1824", "panel": "#F4ECD8", "key": "#FFF2D8", "ambient": "#8A94A8", "fog": "#DDEEF5",
-	"sky": "#7FB8E0", "glow-sign": "#FF5A50", "glow-jukebox": "#FFC850", "glow-tube": "#F0FAFF",
-	"accent": "#A23CFF", "material-floor-light": "#E0CCA0", "material-floor-dark": "#2A2A30",
-	"material-wall": "#8FCFBF", "material-wood": "#7A4E2E", "material-vinyl": "#B02A34",
-	"material-chrome": "#C4CCD6", "material-formica": "#E2CA7A", "material-skin": "#C68462",
-	"material-cloth": "#F2F0EA", "material-paint": "#3A86B8", "material-brick": "#9A5A48",
-	"material-asphalt": "#4E5058",
-}
-const LIGHT := {"amb": 0.75, "sun": 0.62, "sun_dir": Vector3(0.4, 0.8, 0.45), "tubes": 0.12,
-	"sign": 0.35, "juke": 0.55, "head": 0.1, "kitchen": 0.25, "fog_near": 6.0, "fog_far": 55.0}
-const LINES := 240                   # internal render height
-const SEG := 0.5                     # faces split every 0.5 m: light lands, the affine warp never folds
-const SEAT := Vector3(2.4, 1.5, -0.95)
-const T := 1.3                       # the time the key-scene frame is posed at
-
-var retro := preload("res://retro.gdshader")
-var sv: SubViewport
-var view: TextureRect
-var world: Node3D
-var camera: Camera3D
-var tex := {}
-var mats := {}                       # every ShaderMaterial, keyed like the web's material cache
-var emit := {}                       # emit kind -> value
-var hi := {}                         # highlight kind -> value
-
-func v3(role: String, k := 1.0) -> Vector3:   # palette hex as authored, no sRGB decode
-	var c := Color.html(P[role])
-	return Vector3(c.r, c.g, c.b) * k
-
-# ------------------------------------------------------------------ materials
-func M(t: String, o := {}) -> ShaderMaterial:
-	var key: String = t + (":e" + o.emit if o.has("emit") else "") + (":hi" if o.has("hi") else "") + (":u" if o.get("unlit", false) else "")
-	if mats.has(key): return mats[key]
-	var m := ShaderMaterial.new()
-	m.shader = retro
-	m.set_shader_parameter("albedo_tex", tex[t])
-	m.set_shader_parameter("clamp_uv", t == "cook")
-	m.set_meta("emit", o.get("emit", ""))
-	m.set_meta("hi", o.get("hi", ""))
-	m.set_shader_parameter("unlit", 1.0 if o.get("unlit", false) else 0.0)
-	m.set_shader_parameter("fog_on", 0.0 if o.get("unlit", false) else 1.0)
-	mats[key] = m
-	return m
-
-# ------------------------------------------------------------------ geometry helpers
-func box(w: float, h: float, d: float, x: float, y: float, z: float, ry := 0.0) -> Geo:
-	var g := Geo.box(w, h, d, ceili(w / SEG), ceili(h / SEG), ceili(d / SEG))
-	if ry != 0.0: g.rotate_y(ry)
-	return g.translate(x, y, z)
-
-func cyl(r: float, h: float, n: int, x: float, y: float, z: float, r2 := -1.0) -> Geo:
-	return Geo.cylinder(r if r2 < 0.0 else r2, r, h, n).translate(x, y, z)
-
-func add(parent: Node3D, g: Geo, mat: ShaderMaterial, tile := 1.0, inside := false) -> MeshInstance3D:
-	if tile != 0.0: g.box_uv(tile)
-	var mi := MeshInstance3D.new()
-	mi.mesh = g.to_mesh(inside)
-	mi.material_override = mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	parent.add_child(mi)
-	return mi
-
-## A quad that keeps 0..1 UVs (signs, machine fronts), split every 0.25 m or the affine warp folds it.
-func decal(parent: Node3D, w: float, h: float, mat: ShaderMaterial, x: float, y: float, z: float, ry := 0.0) -> void:
-	var g := Geo.plane(w, h, ceili(w / 0.25), ceili(h / 0.25))
-	if ry != 0.0: g.rotate_y(ry)
-	add(parent, g.translate(x, y, z), mat, 0.0)
-
-# ------------------------------------------------------------------ scene
-func _ready() -> void:
-	var win := get_viewport().get_visible_rect().size
-	sv = SubViewport.new()
-	sv.size = Vector2i(roundi(LINES * win.x / win.y), LINES)        # 427 x 240 at 16:9
-	sv.msaa_3d = Viewport.MSAA_DISABLED
-	sv.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
-	sv.use_taa = false
-	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(sv)
-
-	view = TextureRect.new()
-	view.texture = sv.get_texture()
-	view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	view.stretch_mode = TextureRect.STRETCH_SCALE
-	view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	view.set_anchors_preset(Control.PRESET_FULL_RECT)
-	var post := ShaderMaterial.new()
-	post.shader = preload("res://dither.gdshader")
-	post.set_shader_parameter("low_res", Vector2(sv.size))
-	view.material = post
-	add_child(view)
-	# The interface goes in a CanvasLayer above `view`, at window resolution (none in this frame).
-
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color.html(P.fog)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	camera = Camera3D.new()
-	camera.environment = env
-	camera.fov = 55.0
-	camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	camera.near = 0.05
-	camera.far = 300.0
-	camera.position = SEAT
-	camera.rotation = Vector3(deg_to_rad(-7.0), deg_to_rad(84.0), 0.0)   # Godot's Euler order is YXZ
-	sv.add_child(camera)
-	world = Node3D.new()
-	sv.add_child(world)
-
-	make_textures()
-	build_diner()
-	apply_light(Vector2(sv.size), win)
-
-func make_textures() -> void:
-	var tx := RetroTextures.new(P)
-	for n in ["floor", "formica", "brick"]:
-		var src: Image = (load("res://assets/%s.png" % n) as Texture2D).get_image()
-		src.convert(Image.FORMAT_RGBA8)
-		tex[n] = tx.make(n, src)
-	for n in ["wall", "tile", "ceiling", "wood", "vinyl", "chrome", "asphalt", "road", "paint", "glass",
-			"dark", "cloth", "jukefront", "jukearch", "neon", "tube", "sign", "open", "menu", "hill", "sky"]:
-		tex[n] = tx.make(n)
-
-
-# build_diner(): the set, one add()/decal() call per line of demo.html's set list, with the
-# same sizes, positions, materials and tile sizes (see demo.html).
-```
-
-The camera matches three.js's: a 55° vertical field of view (`KEEP_HEIGHT`), near 0.05, far 300,
-Euler order YXZ (Godot's default). The target's width is rounded (427 px where 16:9 gives
-426.67), so the shader's `aspect_fix` scales clip-space x by the target's aspect over the window's,
-as three.js does when it projects with the window's aspect.
 
 ## Import settings
 
@@ -293,11 +173,184 @@ void fragment() {
 }
 ```
 
+## The scene script (`main.gd`)
+
+The palette, the light factors and the pose time are the example's sunny afternoon; a game sets its
+own.
+
+```gdscript
+extends Node
+
+const P := {   # every colour role in style.md, from your palette, for example:
+	"ink": "#1C1824", "panel": "#F4ECD8", "key": "#FFF2D8", "ambient": "#8A94A8", "fog": "#DDEEF5",
+	# ... sky, glow-*, accent, material-*
+}
+const LIGHT := {"amb": 0.75, "sun": 0.62, "sun_dir": Vector3(0.4, 0.8, 0.45), "tubes": 0.12,
+	"sign": 0.35, "juke": 0.55, "head": 0.1, "kitchen": 0.25, "fog_near": 6.0, "fog_far": 55.0}
+const LINES := 240                   # internal render height
+const SEG := 0.5                     # faces split every 0.5 m: light lands, the affine warp never folds
+const SEAT := Vector3(2.4, 1.5, -0.95)
+const T := 1.3                       # the time the key-scene frame is posed at
+
+var retro := preload("res://retro.gdshader")
+var sv: SubViewport
+var view: TextureRect
+var world: Node3D
+var camera: Camera3D
+var tex := {}
+var mats := {}                       # every ShaderMaterial, keyed like the web's material cache
+var emit := {}                       # emit kind -> value
+var hi := {}                         # highlight kind -> value
+
+func v3(role: String, k := 1.0) -> Vector3:   # palette hex as authored, no sRGB decode
+	var c := Color.html(P[role])
+	return Vector3(c.r, c.g, c.b) * k
+
+func M(t: String, o := {}) -> ShaderMaterial:
+	var key: String = t + (":e" + o.emit if o.has("emit") else "") + (":hi" if o.has("hi") else "") + (":u" if o.get("unlit", false) else "")
+	if mats.has(key): return mats[key]
+	var m := ShaderMaterial.new()
+	m.shader = retro
+	m.set_shader_parameter("albedo_tex", tex[t])
+	m.set_shader_parameter("clamp_uv", t == "cook")
+	m.set_meta("emit", o.get("emit", ""))
+	m.set_meta("hi", o.get("hi", ""))
+	m.set_shader_parameter("unlit", 1.0 if o.get("unlit", false) else 0.0)
+	m.set_shader_parameter("fog_on", 0.0 if o.get("unlit", false) else 1.0)
+	mats[key] = m
+	return m
+
+func box(w: float, h: float, d: float, x: float, y: float, z: float, ry := 0.0) -> Geo:
+	var g := Geo.box(w, h, d, ceili(w / SEG), ceili(h / SEG), ceili(d / SEG))
+	if ry != 0.0: g.rotate_y(ry)
+	return g.translate(x, y, z)
+
+func add(parent: Node3D, g: Geo, mat: ShaderMaterial, tile := 1.0, inside := false) -> MeshInstance3D:
+	if tile != 0.0: g.box_uv(tile)
+	var mi := MeshInstance3D.new()
+	mi.mesh = g.to_mesh(inside)
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
+	return mi
+
+## A quad that keeps 0..1 UVs (signs, machine fronts), split every 0.25 m or the affine warp folds it.
+func decal(parent: Node3D, w: float, h: float, mat: ShaderMaterial, x: float, y: float, z: float, ry := 0.0) -> void:
+	var g := Geo.plane(w, h, ceili(w / 0.25), ceili(h / 0.25))
+	if ry != 0.0: g.rotate_y(ry)
+	add(parent, g.translate(x, y, z), mat, 0.0)
+
+func _ready() -> void:
+	var win := get_viewport().get_visible_rect().size
+	sv = SubViewport.new()
+	sv.size = Vector2i(roundi(LINES * win.x / win.y), LINES)        # 427 x 240 at 16:9
+	sv.msaa_3d = Viewport.MSAA_DISABLED
+	sv.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	sv.use_taa = false
+	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(sv)
+
+	view = TextureRect.new()
+	view.texture = sv.get_texture()
+	view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	view.stretch_mode = TextureRect.STRETCH_SCALE
+	view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var post := ShaderMaterial.new()
+	post.shader = preload("res://dither.gdshader")
+	post.set_shader_parameter("low_res", Vector2(sv.size))
+	view.material = post
+	add_child(view)
+	# The interface goes in a CanvasLayer above `view`, at window resolution (none in this frame).
+
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color.html(P.fog)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	camera = Camera3D.new()
+	camera.environment = env
+	camera.fov = 55.0
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	camera.near = 0.05
+	camera.far = 300.0
+	camera.position = SEAT
+	camera.rotation = Vector3(deg_to_rad(-7.0), deg_to_rad(84.0), 0.0)   # Godot's Euler order is YXZ
+	sv.add_child(camera)
+	world = Node3D.new()
+	sv.add_child(world)
+
+	make_textures()
+	build_diner()
+	apply_light(Vector2(sv.size), win)
+```
+
+`make_textures()` fills `tex` with one `RetroTextures.make()` per texture name (passing the image
+of each imported PNG), and `build_diner()` is the example's set: one `add()` or `decal()` per
+piece, with a tile size in metres per texture repeat.
+
+An imported model, drawn by the same shader with its own texture sampled raw:
+
+```gdscript
+## The cook: a Meshy model (about 2,600 triangles, 256 px texture at 5 bits), drawn by the same
+## shader, its texture sampled raw. Facing +z, feet at the origin, 1.95 m to the top of the cap.
+func build_cook() -> Node3D:
+	var g := Node3D.new(); world.add_child(g)
+	var m: Node3D = (load("res://assets/cook.glb") as PackedScene).instantiate()
+	var mi: MeshInstance3D = m.find_children("*", "MeshInstance3D")[0]
+	if not tex.has("cook"):
+		tex["cook"] = (mi.mesh.surface_get_material(0) as BaseMaterial3D).albedo_texture
+	mi.material_override = M("cook")
+	var b := mi.mesh.get_aabb()
+	var k := 1.95 / b.size.y
+	m.scale = Vector3.ONE * k
+	var c := b.get_center()
+	m.position = Vector3(-c.x * k, -b.position.y * k, -c.z * k)
+	g.add_child(m)
+	return g
+```
+
+Light, fog and the animated values, set on every material:
+
+```gdscript
+func apply_light(low: Vector2, win: Vector2) -> void:
+	var L := LIGHT
+	var key := v3("key")
+	var pts := [   # up to six point lights: [position, colour x intensity, falloff k]; your game's lights
+		[Vector3(0, 3.0, 0), key * L.tubes * 0.9, 0.12],
+	]
+	var pp := PackedVector3Array(); var pc := PackedVector3Array(); var pk := PackedFloat32Array()
+	for p in pts: pp.append(p[0]); pc.append(p[1]); pk.append(p[2])
+	# animated values, posed at T (in a game: update emit.sign and hi.juke every frame)
+	emit = {"": 0.0, "tube": L.tubes * 0.9 + 0.1, "juke": L.juke, "head": L.head,
+		"sign": L.sign * (0.92 + 0.05 * sin(T * 13) + 0.03 * sin(T * 31))}   # flicker
+	hi = {"": 0.0, "juke": 0.25 + 0.2 * sin(T * 6)}                        # the accent's one job
+	for m: ShaderMaterial in mats.values():
+		m.set_shader_parameter("low_res", low)
+		m.set_shader_parameter("aspect_fix", (low.x / low.y) / (win.x / win.y))
+		m.set_shader_parameter("ambient", v3("ambient", L.amb))
+		m.set_shader_parameter("sun_col", v3("key", L.sun))
+		m.set_shader_parameter("sun_dir", (L.sun_dir as Vector3).normalized())
+		m.set_shader_parameter("pt_pos", pp)
+		m.set_shader_parameter("pt_col", pc)
+		m.set_shader_parameter("pt_k", pk)
+		m.set_shader_parameter("fog_col", v3("fog"))
+		m.set_shader_parameter("fog_range", Vector2(L.fog_near, L.fog_far))
+		m.set_shader_parameter("accent", v3("accent"))
+		m.set_shader_parameter("emit", emit[m.get_meta("emit")])
+		m.set_shader_parameter("hi", hi[m.get_meta("hi")])
+```
+
+In a game, set `emit` for flickering signs and `hi` for the usable object's pulse every frame
+(`0.92 + 0.05 sin 13t + 0.03 sin 31t` and `0.25 + 0.2 sin 6t`); the render poses them at t = 1.3 s.
+
 ## Geometry (`geo.gd`)
 
-Builds boxes, cylinders, cones, spheres and planes with the vertices, normals, UVs and triangle
-diagonals of three.js's generators, so the affine warp folds the same way. Split boxes every 0.5 m
-(`SEG`) and decals every 0.25 m; the lot is cut in pieces around the floor slab, never under it.
+Boxes and planes split every 0.5 m (`SEG`), decals every 0.25 m, so light lands on the vertices and
+the affine warp never folds a face. `box_uv()` gives planar UVs in metres from the face normal.
+The port's `geo.gd` also clones three.js' `CylinderGeometry` and `SphereGeometry` vertex for vertex,
+so its triangle diagonals warp exactly as the web's do; a game can use Godot's `CylinderMesh` and
+`SphereMesh` at low segment counts (`flip_faces` for a sky dome seen from inside).
 
 ```gdscript
 class_name Geo
@@ -321,7 +374,6 @@ func _v(x: float, y: float, z: float, nx: float, ny: float, nz: float, u: float,
 func count() -> int:
 	return pos.size() / 3
 
-# ------------------------------------------------------------------ transforms (baked, like three)
 func _apply(m: Array, rotate_normals: bool) -> Geo:   # m = 3x3 row-major + translation
 	for i in count():
 		var x := pos[i * 3]; var y := pos[i * 3 + 1]; var z := pos[i * 3 + 2]
@@ -339,22 +391,13 @@ func _apply(m: Array, rotate_normals: bool) -> Geo:   # m = 3x3 row-major + tran
 			nrm[i * 3] = a / l; nrm[i * 3 + 1] = b / l; nrm[i * 3 + 2] = c / l
 	return self
 
-func rotate_x(t: float) -> Geo:
-	var c := cos(t); var s := sin(t)
-	return _apply([1, 0, 0, 0, c, -s, 0, s, c, 0, 0, 0], true)
-
 func rotate_y(t: float) -> Geo:
 	var c := cos(t); var s := sin(t)
 	return _apply([c, 0, s, 0, 1, 0, -s, 0, c, 0, 0, 0], true)
 
-func rotate_z(t: float) -> Geo:
-	var c := cos(t); var s := sin(t)
-	return _apply([c, -s, 0, s, c, 0, 0, 0, 1, 0, 0, 0], true)
-
 func translate(x: float, y: float, z: float) -> Geo:
 	return _apply([1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z], false)
 
-# ------------------------------------------------------------------ primitives
 static func box(w: float, h: float, d: float, ws := 1, hs := 1, ds := 1) -> Geo:
 	var g := Geo.new()
 	g._plane(2, 1, 0, -1, -1, d, h, w, ds, hs)    # +x
@@ -401,77 +444,6 @@ static func plane(w: float, h: float, gx := 1, gy := 1) -> Geo:
 			g.idx.append_array([a, b, d, b, c, d])
 	return g
 
-static func cylinder(rt: float, rb: float, h: float, radial := 8, hseg := 1, open := false,
-		t0 := 0.0, tl := TAU) -> Geo:
-	var g := Geo.new()
-	var half := h / 2.0
-	var slope := (rb - rt) / h
-	var grid := []
-	for y in hseg + 1:
-		var row := []
-		var v := float(y) / hseg
-		var r := v * (rb - rt) + rt
-		for x in radial + 1:
-			var u := float(x) / radial
-			var th := u * tl + t0
-			var s := sin(th); var c := cos(th)
-			var nl := sqrt(s * s + slope * slope + c * c)
-			g._v(r * s, -v * h + half, r * c, s / nl, slope / nl, c / nl, u, 1.0 - v)
-			row.append(g.count() - 1)
-		grid.append(row)
-	for x in radial:
-		for y in hseg:
-			var a: int = grid[y][x]; var b: int = grid[y + 1][x]
-			var c: int = grid[y + 1][x + 1]; var d: int = grid[y][x + 1]
-			if rt > 0 or y != 0: g.idx.append_array([a, b, d])
-			if rb > 0 or y != hseg - 1: g.idx.append_array([b, c, d])
-	if not open:
-		if rt > 0: g._cap(true, rt, half, radial, t0, tl)
-		if rb > 0: g._cap(false, rb, half, radial, t0, tl)
-	return g
-
-func _cap(top: bool, r: float, half: float, radial: int, t0: float, tl: float) -> void:
-	var sgn := 1.0 if top else -1.0
-	var c0 := count()
-	for x in range(1, radial + 1):
-		_v(0.0, half * sgn, 0.0, 0.0, sgn, 0.0, 0.5, 0.5)
-	var e0 := count()
-	for x in radial + 1:
-		var th := float(x) / radial * tl + t0
-		var c := cos(th); var s := sin(th)
-		_v(r * s, half * sgn, r * c, 0.0, sgn, 0.0, c * 0.5 + 0.5, s * 0.5 * sgn + 0.5)
-	for x in radial:
-		var cc := c0 + x; var i := e0 + x
-		if top: idx.append_array([i, i + 1, cc])
-		else: idx.append_array([i + 1, i, cc])
-
-static func sphere(r: float, ws := 8, hs := 6, p0 := 0.0, pl := TAU, t0 := 0.0, tl := PI) -> Geo:
-	var g := Geo.new()
-	var t_end := minf(t0 + tl, PI)
-	var grid := []
-	for iy in hs + 1:
-		var row := []
-		var v := float(iy) / hs
-		var u_off := 0.0
-		if iy == 0 and t0 == 0.0: u_off = 0.5 / ws
-		elif iy == hs and t_end == PI: u_off = -0.5 / ws
-		for ix in ws + 1:
-			var u := float(ix) / ws
-			var x := -r * cos(p0 + u * pl) * sin(t0 + v * tl)
-			var y := r * cos(t0 + v * tl)
-			var z := r * sin(p0 + u * pl) * sin(t0 + v * tl)
-			var l := sqrt(x * x + y * y + z * z)
-			g._v(x, y, z, x / l, y / l, z / l, u + u_off, 1.0 - v)
-			row.append(g.count() - 1)
-		grid.append(row)
-	for iy in hs:
-		for ix in ws:
-			var a: int = grid[iy][ix + 1]; var b: int = grid[iy][ix]
-			var c: int = grid[iy + 1][ix]; var d: int = grid[iy + 1][ix + 1]
-			if iy != 0 or t0 > 0: g.idx.append_array([a, b, d])
-			if iy != hs - 1 or t_end < PI: g.idx.append_array([b, c, d])
-	return g
-
 ## Planar UVs from position, chosen by the face normal; tile = metres per texture repeat.
 func box_uv(tile: float) -> Geo:
 	for i in count():
@@ -505,9 +477,11 @@ func to_mesh(inside := false) -> ArrayMesh:
 
 ## Textures (`textures.gd`)
 
-Drawn at true size with the same calls and seeded randomness as the web demo, then cut to 5 bits per
-channel and flipped vertically (canvas row 0 is the top; three.js's `CanvasTexture` puts it at v = 1,
-and the world-space UVs assume that).
+Drawn in code at true size from the palette roles, cut to 5 bits per channel and flipped vertically
+(canvas row 0 is the top; three.js's `CanvasTexture` puts it at v = 1, and the world-space UVs
+assume that). `r()` is a seeded random in [0, 1), reseeded per texture through `_a`: the port uses
+the demo's mulberry32 seeded with an FNV hash of the texture name so every speck lands where the
+web's does. Any seeded generator per texture serves a game.
 
 ```gdscript
 class_name RetroTextures
@@ -522,23 +496,6 @@ var _a := 0                  # mulberry32 state
 func _init(palette: Dictionary) -> void:
 	P = palette
 
-# ------------------------------------------------------------------ seeded random (mulberry32 + FNV name hash)
-static func imul(x: int, y: int) -> int:
-	return ((x & 0xFFFF) * y + ((((x >> 16) * y) & 0xFFFF) << 16)) & 0xFFFFFFFF
-
-static func name_hash(s: String) -> int:
-	var h := 2166136261
-	for ch in s:
-		h = imul(h ^ ch.unicode_at(0), 16777619)
-	return h
-
-func r() -> float:
-	_a = (_a + 0x6D2B79F5) & 0xFFFFFFFF
-	var t := imul(_a ^ (_a >> 15), 1 | _a)
-	t = ((t + imul(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t
-	return float((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
-
-# ------------------------------------------------------------------ colours (CSS rgb() rounding)
 func rgb(role: String) -> Array:
 	var c := Color.html(P[role])
 	return [c.r8, c.g8, c.b8]
@@ -556,7 +513,6 @@ func mixc(ra: String, rb: String, t: float) -> Color:
 	var a := rgb(ra); var b := rgb(rb)
 	return _css([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])
 
-# ------------------------------------------------------------------ canvas-like drawing
 var fill_col := Color.BLACK
 
 func rect(x: int, y: int, w: int, h: int, col = null) -> void:
@@ -571,9 +527,9 @@ func speck(n: int, col: Color, s := 1) -> void:
 		var x := int(floor(r() * w)); var y := int(floor(r() * h))
 		rect(x, y, s, s)
 
-const GLYPHS := { "O": "01110100011000110001100011000101110", "P": "11110100011000111110100001000010000",
-	"E": "11111100001000011110100001000011111", "N": "10001110011010110011100011000110001",
-	"A": "01110100011000111111100011000110001", "T": "11111001000010000100001000010000100" }
+const GLYPHS := {   # 5 x 7 bitmap letters, row by row; add the letters your signs use
+	"O": "01110100011000110001100011000101110",
+}
 
 ## 5x7 bitmap letters drawn texel by texel; s = texels per glyph pixel.
 func pixel_text(text: String, s: int) -> void:
@@ -601,9 +557,7 @@ func make(tex_name: String, source: Image = null) -> ImageTexture:
 			rect(0, 0, 1, h, shade("material-wall", 0.8)); rect(16, 0, 1, h)
 			rect(1, 0, 1, h, shade("material-wall", 1.1)); rect(17, 0, 1, h)
 			speck(30, shade("material-wall", 0.9))
-		# … one branch per texture, as demo.html's DRAW table: tile, ceiling, wood, vinyl, chrome,
-		# asphalt, road, paint, glass, dark, cloth, jukefront, jukearch, neon, tube, sign, open, menu,
-		# hill, sky
+		# … one branch per texture: base fill, lines, specks, pixel_text() for signs
 	# 5 bits per channel, like the textures of the era
 	for y in h:
 		for x in w:
@@ -612,59 +566,6 @@ func make(tex_name: String, source: Image = null) -> ImageTexture:
 	img.flip_y()   # canvas row 0 is the top; three's CanvasTexture flips it, so v = 0 is the bottom row
 	return ImageTexture.create_from_image(img)
 ```
-
-## The model and the light
-
-```gdscript
-## The cook: a Meshy model (about 2,600 triangles, 256 px texture at 5 bits), drawn by the same
-## shader, its texture sampled raw. Facing +z, feet at the origin, 1.95 m to the top of the cap.
-func build_cook() -> Node3D:
-	var g := Node3D.new(); world.add_child(g)
-	var m: Node3D = (load("res://assets/cook.glb") as PackedScene).instantiate()
-	var mi: MeshInstance3D = m.find_children("*", "MeshInstance3D")[0]
-	if not tex.has("cook"):
-		tex["cook"] = (mi.mesh.surface_get_material(0) as BaseMaterial3D).albedo_texture
-	mi.material_override = M("cook")
-	var b := mi.mesh.get_aabb()
-	var k := 1.95 / b.size.y
-	m.scale = Vector3.ONE * k
-	var c := b.get_center()
-	m.position = Vector3(-c.x * k, -b.position.y * k, -c.z * k)
-	g.add_child(m)
-	return g
-
-# ------------------------------------------------------------------ light, fog and animated values
-func apply_light(low: Vector2, win: Vector2) -> void:
-	var L := LIGHT
-	var key := v3("key")
-	var pts := [
-		[Vector3(-4.5, 3.0, 0), key * L.tubes * 0.9, 0.12], [Vector3(0, 3.0, 0), key * L.tubes * 0.9, 0.12],
-		[Vector3(4.5, 3.0, 0), key * L.tubes * 0.9, 0.12], [Vector3(-14.4, 2.6, -2.2), v3("glow-sign", L.sign * 1.6), 0.08],
-		[Vector3(-5.9, 1.2, -2.9), v3("glow-jukebox", L.juke * 0.8), 0.9], [Vector3(0, 2.3, -4.8), key * L.kitchen, 0.3]]
-	var pp := PackedVector3Array(); var pc := PackedVector3Array(); var pk := PackedFloat32Array()
-	for p in pts: pp.append(p[0]); pc.append(p[1]); pk.append(p[2])
-	# animated values, posed at T (in a game: update emit.sign and hi.juke every frame)
-	emit = {"": 0.0, "tube": L.tubes * 0.9 + 0.1, "juke": L.juke, "head": L.head,
-		"sign": L.sign * (0.92 + 0.05 * sin(T * 13) + 0.03 * sin(T * 31))}   # flicker
-	hi = {"": 0.0, "juke": 0.25 + 0.2 * sin(T * 6)}                        # the accent's one job
-	for m: ShaderMaterial in mats.values():
-		m.set_shader_parameter("low_res", low)
-		m.set_shader_parameter("aspect_fix", (low.x / low.y) / (win.x / win.y))
-		m.set_shader_parameter("ambient", v3("ambient", L.amb))
-		m.set_shader_parameter("sun_col", v3("key", L.sun))
-		m.set_shader_parameter("sun_dir", (L.sun_dir as Vector3).normalized())
-		m.set_shader_parameter("pt_pos", pp)
-		m.set_shader_parameter("pt_col", pc)
-		m.set_shader_parameter("pt_k", pk)
-		m.set_shader_parameter("fog_col", v3("fog"))
-		m.set_shader_parameter("fog_range", Vector2(L.fog_near, L.fog_far))
-		m.set_shader_parameter("accent", v3("accent"))
-		m.set_shader_parameter("emit", emit[m.get_meta("emit")])
-		m.set_shader_parameter("hi", hi[m.get_meta("hi")])
-```
-
-In a game, set `emit` for flickering signs and `hi` for the usable object's pulse every frame
-(`0.92 + 0.05 sin 13t + 0.03 sin 31t` and `0.25 + 0.2 sin 6t`); the render poses them at t = 1.3 s.
 
 ## Compatibility traps
 

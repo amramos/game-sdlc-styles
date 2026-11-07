@@ -11,51 +11,54 @@ still differs is text rasterisation, not layout:
 
 - **Glyph rendering.** The browser draws text with DirectWrite (slightly darker strokes, faint
   colour fringes); Godot draws greyscale coverage, so the body face reads a touch lighter. Godot's
-  LCD subpixel mode was tried and fringes far more than the web frame: keep greyscale.
+  LCD subpixel mode fringes far more than the web frame: keep greyscale.
 - **Tilted and lifted text.** A browser re-rasterises glyphs under `rotate()`/`scale()`; Godot
-  transforms the glyph bitmaps, so the tilted tag and the focused card (×1.06) are a little softer.
-  These two are the worst 64 px tiles (about 20/255 on glyph edges).
-- **A light rim on the scaled card** in the web frame is a browser artefact (the paper background
-  bleeds through the antialiased edge of the scaled border). Godot doesn't draw it.
-- **±1 px** on a few baselines (the third card's text, the chip mark) where the browser's fractional
-  layout rounds differently.
+  transforms the glyph bitmaps, so a tilted tag and the focused card (×1.06) are a little softer
+  (about 20/255 on glyph edges).
+- **A light rim on the scaled card** in the web frame is a browser artefact; Godot doesn't draw it.
+- **±1 px** on a few baselines where the browser's fractional layout rounds differently.
 
 Forward+ renders the same frame (mean difference 0.0/255): nothing here is renderer-specific.
 
-## Scene layout
+The whole project that rendered the frame, including the script that rebuilds the web demo exactly,
+is in this entry's `godot-port/` on the catalog site.
 
-1280×720 base, every coordinate is the web demo's. `main.tscn` is a single root `Control` (full-rect
-anchors) with `main.gd`, which builds the tree:
+## Putting it together
 
-```
+Two layers that never mix: a quiet **stage** of images and a loud **UI** the engine draws from one
+theme. A single root `Control` (full-rect anchors, `theme = InkTheme.build(palette)`) holds both:
+
+```text
 Main (Control, full rect, theme = InkTheme.build(palette))
-├─ Stage (Control)                       quiet: images only
-│  ├─ Backdrop (TextureRect)             stage PNG, keep-aspect-covered into (-20,-70) 1320×880
-│  ├─ Customer (TextureRect)             cast PNG, 500 px tall at (150,118), linear filter
-│  └─ Counter (Panel)                    near-black, 4 px ink top border, covers the actor's legs
-└─ UI (Control)                          loud: the engine draws all of it
-   ├─ Offer (PanelContainer "TagPanel")  tilted −3°: caption + PriceLabel
-   ├─ Line (Control at 600,110)
+├─ Stage (Control)                     quiet: images only
+│  ├─ Backdrop (TextureRect)           stage PNG, STRETCH_KEEP_ASPECT_COVERED
+│  ├─ Actor … (TextureRect)            cast PNGs, linear filter, pivot at the feet
+│  └─ foreground (Panel)               optional dark strip with a 4 px ink top border
+└─ UI (Control)                        loud: the engine draws all of it
+   ├─ tags (PanelContainer "TagPanel") tilted −3° to +3°: Caption label + PriceLabel
+   ├─ Line (Control)
    │  ├─ HalftoneShadow (ColorRect + halftone.gdshader)   under the panel, over the stage
-   │  ├─ SpeechBubble (PanelContainer)   paper panel; draws its own tail, centred on its side
-   │  └─ Who (PanelContainer "WhoPanel") speaker's name on an ink strip, tilted −3°
-   ├─ Chips (HBoxContainer)              20 px under the bubble, wherever its text ends
-   ├─ Options (HBoxContainer)            per option a plain Control slot → card (PanelContainer)
-   ├─ Act (Button)                       ink, with a hard accent shadow behind it
-   └─ FocusBrackets (Control)            four paper corners around the focused card
+   │  ├─ SpeechBubble (PanelContainer) draws its own tail, centred on its side
+   │  └─ Who (PanelContainer "WhoPanel") the speaker's name on an ink strip, tilted
+   ├─ Chips (HBoxContainer)            signal chips, placed under the bubble wherever its text ends
+   ├─ Options (HBoxContainer)          per option a plain Control slot → card (PanelContainer)
+   ├─ Act (Button)                     ink, with a hard accent shadow behind it
+   └─ FocusBrackets (Control)          four paper corners around the focused card
 ```
 
-**Images.** Use the entry's PNGs as they are (`cast/stage-stall-night.png`,
-`cast/customer-haggling.png`). Import settings: lossless (compress mode 0), **mipmaps off**. The
-cast is shown at 0.57× with a plain linear filter: with mipmaps on, the outlines came out softer
-than the browser's downscale (customer region error 2.3 vs 1.7).
+Nothing but the theme names a colour or a font. Tilted panels sit in plain slots (containers reset
+rotation). Build the UI, wait one frame for the containers to lay out, then size and place what
+depends on measured sizes (chips under the bubble, the action button, the first focus).
 
-**Fonts.** The web demo loads no font files: its CSS stacks fall back to whatever the machine has.
-The port uses `SystemFont` with the same stacks in the same order, so it resolves to the same faces
-the web frame used (on a stock Windows machine: Impact for display, Courier New for body, Segoe UI
-Symbol for the chip mark). A game should ship its chosen faces as `FontFile`s (the style's
-licence-safe candidates: Bebas Neue, Oswald or League Gothic for display; Special Elite, Space Mono
-or IBM Plex Mono for body); system fonts differ from machine to machine.
+**Images.** Import the stage and cast PNGs lossless (compress mode 0), **mipmaps off**. A cast image
+shown downscaled (0.57× in the test) uses a plain linear filter: with mipmaps on, outlines came out
+softer than the browser's downscale.
+
+**Fonts.** The port uses `SystemFont` with CSS-like fallback stacks (on a stock Windows machine:
+Impact for display, Courier New for body, Segoe UI Symbol for the chip mark). A game should ship its
+chosen faces as `FontFile`s (the style's licence-safe candidates: Bebas Neue, Oswald or League Gothic
+for display; Special Elite, Space Mono or IBM Plex Mono for body); system fonts differ from machine to
+machine.
 
 **Project settings:**
 
@@ -82,14 +85,15 @@ environment/defaults/default_clear_color=Color(0.0431373, 0.0509804, 0.0784314, 
 
 ## The theme: every font, size and panel in one place
 
-`InkTheme.build(palette)` returns the `Theme`; nothing else names a colour or a font. Type roles are
-`Label` type variations (`Caption`, `Line`, `CardText`, …); panels are `PanelContainer` variations.
-Two helpers carry the web's box model over:
+`InkTheme.build(palette)` returns the `Theme`. Type roles are `Label` type variations (`Caption`,
+`Line`, `CardText`, …); panels are `PanelContainer` variations. Two helpers:
 
-- `panel()` takes CSS padding and adds the border width, because a `StyleBoxFlat`'s content margins
-  are measured from its outer edge, border included.
-- `line_font()` gives a role a CSS-style line height (glyphs centred in the line box, negative
+- `panel()` takes CSS-style padding and adds the border width, because a `StyleBoxFlat`'s content
+  margins are measured from its outer edge, border included.
+- `line_font()` gives a role a fixed line height (glyphs centred in the line box, negative
   half-leading allowed) through `FontVariation.spacing_top/bottom`.
+
+`NIGHT` is the example palette; pass the game's own.
 
 ```gdscript
 class_name InkTheme
@@ -194,7 +198,7 @@ static func build(pal: Dictionary) -> Theme:
 The tail is drawn by the panel itself, after its StyleBox, at `size.y / 2`: it stays centred on the
 side and inside the panel's height for one line or five. The paper triangle covers the panel's
 border between the two strokes, so the tail opens into the panel; the strokes meet in a mitred
-point like SVG `stroke-linejoin: miter`.
+point.
 
 ```gdscript
 class_name SpeechBubble
@@ -234,7 +238,7 @@ func _stroke(a: Vector2, m: Vector2, c: Vector2) -> void:
 ## Halftone (engine-drawn shadows only, never the stage)
 
 On a `ColorRect` the size of the shadow box: the panel's inner box moved 8 px down-right and grown
-12 px. The grid starts at the rect's corner, like a CSS background tile.
+12 px. The grid starts at the rect's corner.
 
 ```glsl
 shader_type canvas_item;
@@ -252,7 +256,195 @@ void fragment() {
 }
 ```
 
-## Focus brackets
+Wiring the shadow, the bubble and the speaker's strip inside the `Line` control (`box`; `ink`,
+`paper` and `PAL` are the palette):
+
+```gdscript
+	var shadow := ColorRect.new()                 # halftone shadow: under the panel, over the stage
+	shadow.name = "HalftoneShadow"
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://halftone.gdshader")
+	mat.set_shader_parameter("dot_color", Color(PAL.shadow))
+	shadow.material = mat
+	box.add_child(shadow)
+	bubble = SpeechBubble.new()
+	bubble.paper = paper
+	bubble.ink = ink
+	bubble.custom_minimum_size.x = 600
+	bubble.add_theme_stylebox_override("panel", InkTheme.panel(paper, ink, 4, Vector4(12, 18, 12, 12)))
+	var text := label(line_text, "Line")
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	bubble.add_child(text)
+	box.add_child(bubble)
+	bubble.resized.connect(func():
+		# the shadow box is the panel's padding box moved 8 px down-right and grown 12 px (CSS ::before)
+		shadow.position = Vector2(12, 12)
+		shadow.size = bubble.size - Vector2(4, 4)
+		mat.set_shader_parameter("rect_size", shadow.size))   # then re-place what sits under the bubble
+	var who := PanelContainer.new()
+	who.name = "Who"
+	who.theme_type_variation = "WhoPanel"
+	who.position = Vector2(-6, -22)                # CSS left:-10px top:-26px from the padding edge
+	who.add_child(label(speaker_name, "Who"))
+	box.add_child(who)
+	tilt(who, -3.0)
+```
+
+## Small building blocks
+
+A label in a type role, and a tilt about the centre that survives layout:
+
+```gdscript
+func label(text: String, variation: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.theme_type_variation = variation
+	if variation.ends_with("Caption") or variation in ["Who", "ChipWord"]:
+		l.uppercase = true
+	return l
+
+## Tilted labels live in a plain slot: containers reset rotation, the slot doesn't.
+func tilt(node: Control, degrees: float) -> void:
+	var centre := func(): node.pivot_offset = node.size / 2.0   # rotate about the centre, like CSS
+	node.resized.connect(centre)
+	centre.call_deferred()
+	node.rotation_degrees = degrees
+```
+
+A signal chip: its own fill, ink text, and the kind in a word plus a mark:
+
+```gdscript
+## A signal chip: its own fill, ink text, and the kind in a word plus a mark (never colour alone).
+func _chip(mark: String, word: String, kind: int) -> Control:
+	var chip := PanelContainer.new()
+	chip.theme_type_variation = "Chip%d" % kind
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 7)
+	chip.add_child(row)
+	var m := Panel.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = ink
+	m.add_theme_stylebox_override("panel", sb)
+	m.custom_minimum_size = Vector2(24, 24)
+	m.size_flags_vertical = SIZE_SHRINK_CENTER
+	var ml := label(mark, "Mark")
+	ml.set_anchors_preset(PRESET_FULL_RECT)
+	ml.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ml.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	m.add_child(ml)
+	row.add_child(m)
+	var wl := label(word, "ChipWord")
+	wl.size_flags_vertical = SIZE_SHRINK_CENTER
+	row.add_child(wl)
+	return chip
+```
+
+A number with its unit: the numbers players decide by are display-face text with a small unit on the
+same baseline. A `Label` can't mix sizes on one baseline, so this small `Control` draws both.
+
+```gdscript
+class_name PriceLabel
+extends Control
+## A number players decide by, in the display face, with its unit small after it on the same
+## baseline ("12 coins"). The number sits centred in a `line_height` px line box, like CSS.
+
+@export var number := "0"
+@export var unit := " coins"
+@export var number_size := 40
+@export var unit_size := 20
+@export var line_height := 36.0
+@export var baseline_shift := 0.0   # extra px down, when the line box holds a taller strut
+@export var centred := false
+var color := Color.BLACK
+var font: Font
+
+func _ready() -> void:
+	if font == null:
+		font = InkTheme.display_base
+	custom_minimum_size = Vector2(_width(), line_height)
+
+func _width() -> float:
+	return font.get_string_size(number, 0, -1, number_size).x + font.get_string_size(unit, 0, -1, unit_size).x
+
+func _draw() -> void:
+	var a := font.get_ascent(number_size)
+	var d := font.get_descent(number_size)
+	var x := (size.x - _width()) / 2.0 if centred else 0.0
+	var y := (line_height - (a + d)) / 2.0 + a + baseline_shift
+	draw_string(font, Vector2(x, y), number, HORIZONTAL_ALIGNMENT_LEFT, -1, number_size, color)
+	x += font.get_string_size(number, 0, -1, number_size).x
+	draw_string(font, Vector2(x, y), unit, HORIZONTAL_ALIGNMENT_LEFT, -1, unit_size, color)
+```
+
+## Option cards, focus and the action
+
+Each option is a card in a plain slot, so the card can lift and scale inside it without the row
+moving. `OPTIONS` is the game's list of `[caption, text, number]`. After layout, give each card its
+own minimum size, set the slot's minimum to it and the card's pivot to its centre; bottom-align the
+row.
+
+```gdscript
+func _build_options(ui: Control) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "Options"
+	row.add_theme_constant_override("separation", 22)
+	ui.add_child(row)
+	for o in OPTIONS:
+		var slot := Control.new()                 # the container lays out the slot; the card lifts inside it
+		slot.size_flags_vertical = SIZE_SHRINK_END
+		var card := PanelContainer.new()
+		card.theme_type_variation = "CardPanel"
+		card.focus_mode = FOCUS_ALL
+		card.custom_minimum_size = Vector2(190, 118)
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 0)
+		card.add_child(col)
+		var cap := label(o[0], "CardCaption")
+		cap.modulate.a = 0.9
+		col.add_child(cap)
+		col.add_child(_gap(4))
+		var txt := label(o[1], "CardText")
+		txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		txt.custom_minimum_size.x = 158
+		col.add_child(txt)
+		col.add_child(_gap(6))
+		var num := PriceLabel.new()
+		num.number = o[2]
+		num.line_height = 39.0                    # the number's line box, with the body face's strut
+		                                          # (containers lay out in whole px: 2 x 23 + 39 = the web's 45.6 + 39.4)
+		num.baseline_shift = -1.0
+		num.color = ink
+		col.add_child(num)
+		slot.add_child(card)
+		row.add_child(slot)
+		cards.append(card)
+		var i := cards.size() - 1
+		card.mouse_entered.connect(func(): set_focus(i))
+		card.focus_entered.connect(func(): set_focus(i))
+	return row
+
+```
+
+```gdscript
+## The focused card lifts (12 px up, x1.06) and the brackets close in around it.
+func set_focus(i: int, animate := true) -> void:
+	for j in cards.size():
+		var lifted := j == i
+		var face := cards[j]
+		if animate:
+			var tw := face.create_tween().set_parallel().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tw.tween_property(face, "position:y", -12.0 if lifted else 0.0, 0.08)
+			tw.tween_property(face, "scale", Vector2.ONE * (1.06 if lifted else 1.0), 0.08)
+		else:
+			face.position.y = -12.0 if lifted else 0.0
+			face.scale = Vector2.ONE * (1.06 if lifted else 1.0)
+	var c := cards[i]
+	var slot := c.get_parent() as Control
+	var sz := c.size * 1.06
+	var centre := slot.global_position + c.size / 2.0 + Vector2(0, -12)
+	focus_mark.show_around(Rect2(centre - sz / 2.0, sz), animate)
+
+```
 
 ```gdscript
 class_name FocusBrackets
@@ -294,316 +486,13 @@ func _draw() -> void:
 			draw_colored_polygon(p, paper)
 ```
 
-## A number with its unit
-
-The numbers players decide by are display-face text with a small unit on the same baseline. A
-`Label` can't mix sizes on one baseline, so this small `Control` draws both.
+The primary action: ink, with a hard offset shadow in the accent and no blur.
 
 ```gdscript
-class_name PriceLabel
-extends Control
-## A number players decide by, in the display face, with its unit small after it on the same
-## baseline ("12 coins"). The number sits centred in a `line_height` px line box, like CSS.
-
-@export var number := "0"
-@export var unit := " coins"
-@export var number_size := 40
-@export var unit_size := 20
-@export var line_height := 36.0
-@export var baseline_shift := 0.0   # extra px down, when the line box holds a taller strut
-@export var centred := false
-var color := Color.BLACK
-var font: Font
-
-func _ready() -> void:
-	if font == null:
-		font = InkTheme.display_base
-	custom_minimum_size = Vector2(_width(), line_height)
-
-func _width() -> float:
-	return font.get_string_size(number, 0, -1, number_size).x + font.get_string_size(unit, 0, -1, unit_size).x
-
-func _draw() -> void:
-	var a := font.get_ascent(number_size)
-	var d := font.get_descent(number_size)
-	var x := (size.x - _width()) / 2.0 if centred else 0.0
-	var y := (line_height - (a + d)) / 2.0 + a + baseline_shift
-	draw_string(font, Vector2(x, y), number, HORIZONTAL_ALIGNMENT_LEFT, -1, number_size, color)
-	x += font.get_string_size(number, 0, -1, number_size).x
-	draw_string(font, Vector2(x, y), unit, HORIZONTAL_ALIGNMENT_LEFT, -1, unit_size, color)
-```
-
-## The key scene
-
-The content strings are the demo's example setting; everything else is the look.
-
-```gdscript
-extends Control
-## Port of loud-ink-cast-quiet-stage/demo.html?frame=key-scene (night palette).
-## The stage and the cast are the entry's generated images; the engine draws only the interface.
-## 1280x720 base, stretch canvas_items; every coordinate is the demo's.
-
-const PAL := InkTheme.NIGHT
-const LINE := "Eight coins. That bowl is half steam."
-const CHIPS := [["↺", "Regular", 1]]
-const OPTIONS := [["Hold firm", "Stay at the price", "12"], ["Meet them", "Split the difference", "10"],
-	["Sweeten", "Add a skewer", "12"]]
-const FOCUSED := 1
-
-var ink := Color(PAL.ink)
-var paper := Color(PAL.paper)
-var cards: Array[Control] = []
-var bubble: SpeechBubble
-var chips: HBoxContainer
-var focus_mark: FocusBrackets
-
-func _ready() -> void:
-	theme = InkTheme.build(PAL)
-	_build_stage()
-	var ui := Control.new()
-	ui.name = "UI"
-	ui.set_anchors_preset(PRESET_FULL_RECT)
-	ui.mouse_filter = MOUSE_FILTER_IGNORE
-	add_child(ui)
-	_build_offer(ui)
-	_build_line(ui)
-	var options := _build_options(ui)
-	_build_action(ui)
-	focus_mark = FocusBrackets.new()
-	focus_mark.paper = paper
-	focus_mark.ink = ink
-	focus_mark.mouse_filter = MOUSE_FILTER_IGNORE
-	ui.add_child(focus_mark)
-	await get_tree().process_frame           # containers have laid out
-	await _layout_options(options)
-	_place_chips()
-	set_focus(FOCUSED, false)
-
-# ---------------------------------------------------------------- stage: images only, quiet
-func _build_stage() -> void:
-	var stage := Control.new()
-	stage.name = "Stage"
-	stage.set_anchors_preset(PRESET_FULL_RECT)
-	stage.mouse_filter = MOUSE_FILTER_IGNORE
-	add_child(stage)
-	var back := TextureRect.new()
-	back.name = "Backdrop"
-	back.texture = load("res://cast/stage-stall-night.png")
-	back.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	back.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED   # CSS object-fit: cover
-	back.position = Vector2(-20, -70)
-	back.size = Vector2(1320, 880)
-	stage.add_child(back)
-	var actor := TextureRect.new()
-	actor.name = "Customer"
-	actor.texture = load("res://cast/customer-haggling.png")
-	actor.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	actor.stretch_mode = TextureRect.STRETCH_SCALE
-	actor.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR   # shown at 0.57x; mipmaps measured softer than the browser
-	var h := 500.0
-	actor.size = Vector2(h * actor.texture.get_width() / actor.texture.get_height(), h)
-	actor.position = Vector2(150, 118)
-	actor.pivot_offset = Vector2(actor.size.x / 2.0, h)   # idle bob scales from the feet
-	stage.add_child(actor)
-	var counter := Panel.new()
-	counter.name = "Counter"
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(PAL.counter)
-	sb.border_color = ink
-	sb.border_width_top = 4
-	counter.add_theme_stylebox_override("panel", sb)
-	counter.position = Vector2(0, 536)
-	counter.size = Vector2(1280, 184)
-	stage.add_child(counter)
-
-# ---------------------------------------------------------------- helpers
-func label(text: String, variation: String) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.theme_type_variation = variation
-	if variation.ends_with("Caption") or variation in ["Who", "ChipWord"]:
-		l.uppercase = true
-	return l
-
-## Tilted labels live in a plain slot: containers reset rotation, the slot doesn't.
-func tilt(node: Control, degrees: float) -> void:
-	var centre := func(): node.pivot_offset = node.size / 2.0   # rotate about the centre, like CSS
-	node.resized.connect(centre)
-	centre.call_deferred()
-	node.rotation_degrees = degrees
-
-# ---------------------------------------------------------------- their offer: a tilted tag
-func _build_offer(ui: Control) -> void:
-	var tag := PanelContainer.new()
-	tag.name = "Offer"
-	tag.theme_type_variation = "TagPanel"
-	tag.position = Vector2(36, 30)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 0)
-	tag.add_child(col)
-	var cap := label("Their offer", "Caption")
-	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(cap)
-	var num := PriceLabel.new()
-	num.number = "8"
-	num.number_size = 58
-	num.unit_size = 26
-	num.line_height = 52.2
-	num.centred = true
-	num.color = ink
-	col.add_child(num)
-	ui.add_child(tag)
-	tilt(tag, -3.0)
-
-# ---------------------------------------------------------------- the line, pointing at the speaker
-func _build_line(ui: Control) -> void:
-	var box := Control.new()
-	box.name = "Line"
-	box.position = Vector2(600, 110)
-	box.mouse_filter = MOUSE_FILTER_IGNORE
-	ui.add_child(box)
-	var shadow := ColorRect.new()                 # halftone shadow: under the panel, over the stage
-	shadow.name = "HalftoneShadow"
-	var mat := ShaderMaterial.new()
-	mat.shader = load("res://halftone.gdshader")
-	mat.set_shader_parameter("dot_color", Color(PAL.shadow))
-	shadow.material = mat
-	box.add_child(shadow)
-	bubble = SpeechBubble.new()
-	bubble.paper = paper
-	bubble.ink = ink
-	bubble.custom_minimum_size.x = 600
-	bubble.add_theme_stylebox_override("panel", InkTheme.panel(paper, ink, 4, Vector4(12, 18, 12, 12)))
-	var text := label(LINE, "Line")
-	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	bubble.add_child(text)
-	box.add_child(bubble)
-	bubble.resized.connect(func():
-		# the shadow box is the panel's padding box moved 8 px down-right and grown 12 px (CSS ::before)
-		shadow.position = Vector2(12, 12)
-		shadow.size = bubble.size - Vector2(4, 4)
-		mat.set_shader_parameter("rect_size", shadow.size)
-		_place_chips())
-	var who := PanelContainer.new()
-	who.name = "Who"
-	who.theme_type_variation = "WhoPanel"
-	who.position = Vector2(-6, -22)                # CSS left:-10px top:-26px from the padding edge
-	who.add_child(label("Pell", "Who"))
-	box.add_child(who)
-	tilt(who, -3.0)
-	chips = HBoxContainer.new()
-	chips.name = "Chips"
-	chips.add_theme_constant_override("separation", 10)
-	for c in CHIPS:
-		chips.add_child(_chip(c[0], c[1], c[2]))
-	ui.add_child(chips)
-
-## A signal chip: its own fill, ink text, and the kind in a word plus a mark (never colour alone).
-func _chip(mark: String, word: String, kind: int) -> Control:
-	var chip := PanelContainer.new()
-	chip.theme_type_variation = "Chip%d" % kind
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 7)
-	chip.add_child(row)
-	var m := Panel.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = ink
-	m.add_theme_stylebox_override("panel", sb)
-	m.custom_minimum_size = Vector2(24, 24)
-	m.size_flags_vertical = SIZE_SHRINK_CENTER
-	var ml := label(mark, "Mark")
-	ml.set_anchors_preset(PRESET_FULL_RECT)
-	ml.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ml.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	m.add_child(ml)
-	row.add_child(m)
-	var wl := label(word, "ChipWord")
-	wl.size_flags_vertical = SIZE_SHRINK_CENTER
-	row.add_child(wl)
-	return chip
-
-func _place_chips() -> void:
-	if chips and bubble:
-		chips.position = Vector2(600, 110 + bubble.size.y + 20)   # under the line, wherever its text ends
-
-# ---------------------------------------------------------------- the player's options on the counter
-func _build_options(ui: Control) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.name = "Options"
-	row.add_theme_constant_override("separation", 22)
-	ui.add_child(row)
-	for o in OPTIONS:
-		var slot := Control.new()                 # the container lays out the slot; the card lifts inside it
-		slot.size_flags_vertical = SIZE_SHRINK_END
-		var card := PanelContainer.new()
-		card.theme_type_variation = "CardPanel"
-		card.focus_mode = FOCUS_ALL
-		card.custom_minimum_size = Vector2(190, 118)
-		var col := VBoxContainer.new()
-		col.add_theme_constant_override("separation", 0)
-		card.add_child(col)
-		var cap := label(o[0], "CardCaption")
-		cap.modulate.a = 0.9
-		col.add_child(cap)
-		col.add_child(_gap(4))
-		var txt := label(o[1], "CardText")
-		txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		txt.custom_minimum_size.x = 158
-		col.add_child(txt)
-		col.add_child(_gap(6))
-		var num := PriceLabel.new()
-		num.number = o[2]
-		num.line_height = 39.0                    # the number's line box, with the body face's strut
-		                                          # (containers lay out in whole px: 2 x 23 + 39 = the web's 45.6 + 39.4)
-		num.baseline_shift = -1.0
-		num.color = ink
-		col.add_child(num)
-		slot.add_child(card)
-		row.add_child(slot)
-		cards.append(card)
-		var i := cards.size() - 1
-		card.mouse_entered.connect(func(): set_focus(i))
-		card.focus_entered.connect(func(): set_focus(i))
-	return row
-
-## Each card keeps its own height (min 118); the row sits 26 px above the bottom, cards bottom-aligned.
-func _layout_options(row: HBoxContainer) -> void:
-	for c in cards:
-		c.size = c.get_combined_minimum_size()
-		c.get_parent().custom_minimum_size = c.size
-		c.pivot_offset = c.size / 2.0
-	await get_tree().process_frame
-	row.size = row.get_combined_minimum_size()
-	row.position = Vector2(28, 720 - 26 - row.size.y).round()
-
-func _gap(h: float) -> Control:
-	var g := Control.new()
-	g.custom_minimum_size.y = h
-	return g
-
-## The focused card lifts (12 px up, x1.06) and the brackets close in around it.
-func set_focus(i: int, animate := true) -> void:
-	for j in cards.size():
-		var lifted := j == i
-		var face := cards[j]
-		if animate:
-			var tw := face.create_tween().set_parallel().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			tw.tween_property(face, "position:y", -12.0 if lifted else 0.0, 0.08)
-			tw.tween_property(face, "scale", Vector2.ONE * (1.06 if lifted else 1.0), 0.08)
-		else:
-			face.position.y = -12.0 if lifted else 0.0
-			face.scale = Vector2.ONE * (1.06 if lifted else 1.0)
-	var c := cards[i]
-	var slot := c.get_parent() as Control
-	var sz := c.size * 1.06
-	var centre := slot.global_position + c.size / 2.0 + Vector2(0, -12)
-	focus_mark.show_around(Rect2(centre - sz / 2.0, sz), animate)
-
-# ---------------------------------------------------------------- the primary action
 func _build_action(ui: Control) -> void:
 	var act := Button.new()
 	act.name = "Act"
-	act.text = "OFFER"
+	act.text = verb                           # the action, in a word
 	act.focus_mode = FOCUS_NONE
 	var shade := ColorRect.new()                  # hard offset shadow in the accent, no blur
 	shade.color = Color(PAL.accent)
@@ -618,32 +507,30 @@ func _build_action(ui: Control) -> void:
 	act.position = Vector2(1280 - 40, 720 - 44) - act.size
 ```
 
-**Idle motion** (not in the still frame): the web demo bobs the speaking actor at about 10 fps
-(`scaleY(1 + 0.008 sin 2.4t)`, `rotate(0.6° sin 1.2t)`) from the feet; the `Customer` node's pivot is
-already at its feet for this. Pause it when the window loses focus.
+**Idle motion** (not in the still frame): bob the speaking actor at about 10 fps
+(`scaleY(1 + 0.008 sin 2.4t)`, `rotate(0.6° sin 1.2t)`) from the feet; set the actor's
+`pivot_offset` at its feet for this. Pause it when the window loses focus.
 
 ## Traps found in the port
 
 None of these is Compatibility-specific: Forward+ draws the same frame.
 
 - **Pivot before layout.** A `PanelContainer` gets its size a frame after it enters the tree. A
-  pivot set from that first size, or never updated, rotates the tag about its top-left corner: a 3°
-  tilt then moves it about 2 px right and 3 px up. Set `pivot_offset` on `resized` and once deferred.
-- **StyleBox margins include the border.** Setting `content_margin_*` to the CSS padding alone puts
+  pivot set from that first size, or never updated, rotates a tag about its top-left corner (a 3°
+  tilt then moves it about 2 px right and 3 px up). Set `pivot_offset` on `resized` and once deferred.
+- **StyleBox margins include the border.** Setting `content_margin_*` to the padding alone puts
   text 4 px too close to every edge.
-- **Containers lay out in whole pixels.** Fractional CSS line heights (22.8 px) round per child, so a
-  card grows by a pixel and every bracket and lift after it moves. Budget line boxes in whole pixels
-  (here 2 × 23 + 39 for the web's 45.6 + 39.4).
+- **Containers lay out in whole pixels.** Fractional line heights (22.8 px) round per child, so a
+  card grows by a pixel and every bracket and lift after it moves. Budget line boxes in whole pixels.
 - **Hinting rounds advances.** With `SystemFont`'s default hinting, a 22 px monospace advance is 13
   px instead of 13.2: a 37-character line ends 7 px short. `HINTING_NONE` plus quarter-pixel subpixel
-  positioning gives browser-like advances.
-- **Godot rounds ascent and descent up,** a browser rounds to nearest, so a CSS line height centres
-  the glyphs up to 1 px differently; each role in the theme has a `shift` for this.
-- **Letter-spacing.** CSS letter-spacing also follows the last letter (it widens the box); Godot's
-  `spacing_glyph` doesn't. Add it to the right margin where a box must match (the action button).
-  `spacing_glyph` is whole pixels, so 0.06 em becomes 1 px.
+  positioning gives fractional advances.
+- **Godot rounds ascent and descent up,** a browser rounds to nearest, so a line height centres the
+  glyphs up to 1 px differently; each role in the theme has a `shift` for this.
+- **Letter-spacing.** Godot's `spacing_glyph` doesn't follow the last letter as CSS letter-spacing
+  does; add it to the right margin where a box must fit (the action button). It is whole pixels.
 - **Symbol fallback.** A mark the display face lacks (↺) falls back to an OS font of a different
-  size and baseline than the browser's. Name a symbol face for marks.
-- **2D MSAA** (`anti_aliasing/quality/msaa_2d`) changed nothing in this frame (no pixel differed);
-  `draw_colored_polygon()` edges (tail, brackets) are aliased either way, which at 4 px ink on these
-  shapes is within a pixel of the web.
+  size and baseline per platform. Name a symbol face for marks.
+- **2D MSAA** (`anti_aliasing/quality/msaa_2d`) changed nothing; `draw_colored_polygon()` edges
+  (tail, brackets) are aliased either way, which at 4 px ink on these shapes is within a pixel of
+  the web.

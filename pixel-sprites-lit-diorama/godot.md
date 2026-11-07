@@ -19,6 +19,9 @@ grade and the three captions sit where the web frame has them. What still differ
 
 > **The `assets/` paths below load this entry's example art**, which is how the port was tested against the web demo. A game never ships it: load the game's own models, sprites and textures, made the same way, in their place.
 
+The whole project that rendered the frame, including the code that rebuilds the web demo exactly, is
+in this entry's `godot-port/` on the catalog site. This file keeps what a game needs to draw the look.
+
 **Forward+** renders the same frame with mean 5.2 / 4.7 / 4.2 against the web frame. Surfaces that
 wear the grey value maps come out about 10 levels brighter there, probably because the
 single-channel PNGs aren't sRGB-decoded the same way. If you ship on Forward+, save the maps as RGB.
@@ -28,59 +31,72 @@ differ.
 **Not covered by this test.** Bloom: the web's UnrealBloom (threshold 0.88 linear) finds nothing
 above threshold in the day key scene, so there is no bloom pass here. A night scheme with lit lamp
 cores needs Environment glow and the lamp's `OmniLight3D`, and neither has been tested in Godot.
-Palette switching and the close-up camera aren't ported either: the palette is one dictionary and
-the camera is fixed.
+Palette switching and the close-up camera aren't ported either.
 
 ## Project and import settings
 
 - Renderer **Compatibility**, viewport 1280 × 720, `anti_aliasing/quality/msaa_3d = 4×`
   (the web renders into a 4× multisampled target), directional shadow atlas 4096,
   `soft_shadow_filter_quality = 3`.
-- **Sprites and signs** (32 × 48 and 48 × 24 PNGs, the generated cast and boards): import with
-  `compress/mode = Lossless`, `mipmaps/generate = false`, and
-  **`detect_3d/compress_to = Disabled`**. With the default, Godot switches a texture to VRAM
-  compression the first time it sees it used in 3D, which smears pixel art. The shaders sample them
-  `filter_nearest`.
-- **Value maps** (the 128² and 256² grey MaterialCraft maps): `Lossless`, `mipmaps/generate = true`,
+- **Sprites and signs** (pixel-art PNGs): import with `compress/mode = Lossless`,
+  `mipmaps/generate = false`, and **`detect_3d/compress_to = Disabled`**. With the default, Godot
+  switches a texture to VRAM compression the first time it sees it used in 3D, which smears pixel
+  art. The shaders sample them `filter_nearest`.
+- **Value maps** (128² and 256² grey maps): `Lossless`, `mipmaps/generate = true`,
   `detect_3d/compress_to = Disabled`, sampled `filter_nearest_mipmap_anisotropic, repeat_enable`.
   Godot has no separate magnification and minification filters. This gives nearest texels up close
   and mipmaps far away, which is what three.js' `NearestFilter` / `LinearMipmapLinearFilter` pair
   does.
-- **Textures drawn in code** (brushy grain, awning stripes, the painted sky) are `Image`s built at
-  start-up with the web demo's seeded random (mulberry32) and canvas rules, then turned into
-  `ImageTexture`s with mipmaps.
+- **Textures drawn in code** (the brushy grain, the painted sky) are `Image`s built at start-up and
+  turned into `ImageTexture`s with mipmaps. The port's `sky_image()` repeats the demo's canvas
+  painting step by step (gradient, halo round the key, 70 cloud strokes, two hill layers, fog below
+  the horizon); a game paints its own backdrop to recipe.md's numbers, in code or with an image
+  model, and passes it to `backdrop.gdshader` the same way.
 - **Font:** the demo uses the system's Palatino Linotype (Book Antiqua, Palatino, Georgia as
   fallbacks), so the port uses a `SystemFont` with the same names. Bold is a 600 weight with OpenType
   small caps (`smcp`) and 1 px letter spacing; the description line is italic. To ship it, bundle a
   licensed copy or a free Palatino-style face (TeX Gyre Pagella, for example).
 
-## Scene layout
+## Putting it together
 
-Everything is built in code by one script on a `Node3D` (below), using the demo's numbers:
+One script on a `Node3D` builds the scene in code:
 
-- `Camera3D` with a vertical fov of 46°, near 0.3 and far 600, at (-1.4, 6.0, 12.8) looking at
-  (0.4, 0.2, -3.0).
-- One `DirectionalLight3D` (the key), shadowed and orthogonal, max distance 40, from
-  key position + target (-9, 14, 6) toward (0, 0, -1). The rim light, the hemisphere fill and the
-  fog are not nodes: they're computed inside the toon shader's `light()` for the key (see the traps).
-- `WorldEnvironment`: background colour = `fog`, ambient black, reflections off, tonemap Linear,
-  Environment fog off.
-- The set: the terrace and the building under it, the parapet, three stalls (counter, posts, an
-  awning with stripes in two set roles, goods, a generated sign board), three lamps, bunting on four
-  posts, planters, potted trees, crates, a bench, and the hill town (four seeded rows of houses with
-  4-sided tiled roofs, plus side buildings). Every box, cone and icosahedron is built the way
-  three.js builds it, with the same vertices, normals and UVs, so the toon bands and the world-unit
-  texel grid land in the same places. Godot's `BoxMesh` lays its UVs out as an atlas, which breaks
-  per-face grain and world-unit UVs.
-- The valley: a 320 × 180 `PlaneMesh` (200 × 110 segments) at (0, -20, -80) with the animated
-  banded shader posed at t = 2.0 s. The painted backdrop: an open cylinder (radius 190, 2.5 rad
-  around) with the sky image. Four light shafts and 18 mist discs.
-- The cast: four quads with the generated sprites, nearest-filtered and alpha-cut, turned to the
-  camera on Y only, mirrored with `scale.x = -1` when facing left. Each stands on a contact blob,
-  and the selected one stands in an accent ring.
-- Post: a `CanvasLayer` (layer 1) with three full-rect `ColorRect`s, horizontal tilt-shift →
-  `BackBufferCopy` → vertical tilt-shift → `BackBufferCopy` → grade. Captions are drawn on a
-  `Control` in a `CanvasLayer` (layer 2) above the post, so they stay sharp, like the web's HTML.
+```
+Node3D (main.gd)
+├─ world: Node3D            the set: boxes and primitives with toon materials, contact blobs,
+│                           sprite quads for the cast, the additive selection ring
+├─ valley: MeshInstance3D   PlaneMesh 320 × 180, 200 × 110 segments, valley.gdshader
+├─ backdrop                 open cylinder arc (radius ≥ 10× the set, 2.5 rad), backdrop.gdshader
+├─ shafts, mist             planes with shaft.gdshader and mist.gdshader, behind the set
+├─ DirectionalLight3D       the key: shadowed, orthogonal, max distance 40
+├─ WorldEnvironment         background = fog, ambient black, reflections off, tonemap Linear, fog off
+├─ Camera3D                 fov 46°, near 0.3, far 600, pitched 18–22° down
+├─ CanvasLayer 1 (post)     ColorRect tilt (h) → BackBufferCopy → ColorRect tilt (v)
+│                           → BackBufferCopy → ColorRect grade
+└─ CanvasLayer 2            a Control that draws the captions above the post, so they stay sharp
+```
+
+Which material goes where:
+
+- **Set pieces:** `toon.gdshader` (via `paint()`, `M()` for grain, `MT()` for a tiling value map).
+  `toon_double.gdshader` for thin two-sided pieces (cloth, flags); `toon_cutout.gdshader` for
+  pixel-art boards with transparent edges. Thin flags with no UVs set `grain_corner = true`.
+- **The cast:** `sprite.gdshader` on a quad turned to the camera on Y only, mirrored with
+  `scale.x = -1` when facing left, standing on a `blob.gdshader` contact disc.
+- **Lamp cores and lines:** `unlit.gdshader`; an unlit lamp core is drawn at
+  `srgb(lin(col("glow-lamp")) * 0.8)`.
+- **The selection ring:** `additive.gdshader` on a flat ring, inner radius 0.5, outer 0.64, 48
+  segments, 0.02 above the floor (the port clones three.js' `RingGeometry`; any flat ring mesh works).
+- **Atmosphere:** `valley.gdshader`, `backdrop.gdshader`, `shaft.gdshader`, `mist.gdshader`.
+- The rim light, the hemisphere fill and the fog are not nodes: the toon shader's `light()` adds
+  them for the key (see the traps).
+
+The port builds every box and cylinder the way three.js does, so the toon bands and the world-unit
+texel grid land where the web frame has them. A game needs the same thing for a different reason:
+Godot's `BoxMesh` lays its UVs out as an atlas, which breaks per-face grain and world-unit UVs, so
+use `box_geo()` + `world_uv()` below (or your own meshes with per-face UVs). The port also clones
+three.js' `IcosahedronGeometry` for foliage and goods; a game can use a flat-shaded icosahedron
+(an icosphere with no subdivision) from any modelling tool.
 
 ## Compatibility traps (4.7.1)
 
@@ -109,13 +125,11 @@ Engine-independent points:
 
 - **three.js' shadow camera is a ±13 m box** around the key target; outside it nothing is shadowed.
   Godot's directional shadow reaches as far as `max_distance` from the camera. The toon shader masks
-  the shadow to the same box, using the world position against the shadow camera's axes.
-- **Caption layout follows CSS.** A caption's width is its unwrapped text width + 18 px padding,
-  capped at 240, so a caption that wraps takes the full 240. Its height is padding + lines × 1.2 ×
-  font size, rounded the way `offsetWidth` and `offsetHeight` round. Lines break after spaces and
-  hyphens. Chrome draws light-on-dark text heavier, with the baseline about 2 px lower than
-  FreeType's centred line box would put it.
-- **Glyph rasterisation** can't be matched exactly. Expect about 20/255 on text pixels.
+  the shadow to the same box, using the world position against the shadow camera's axes
+  (`shadow_half`); set it to cover your set plus 30%.
+- **Caption text:** the port sizes captions like CSS (shrink to the unwrapped text width, capped at
+  240 px) and nudges FreeType toward Chrome (`EMBOLDEN`, `BASELINE_SHIFT`). Glyph rasterisation
+  can't be matched exactly; expect about 20/255 on text pixels against the web.
 
 ## Shaders
 
@@ -263,7 +277,7 @@ void fragment() {
 }
 ```
 
-`blob.gdshader`, `unlit.gdshader` (lamp cores, bunting lines), `additive.gdshader` (the selection
+`blob.gdshader`, `unlit.gdshader` (lamp cores, lines), `additive.gdshader` (the selection
 ring), `shaft.gdshader`, `mist.gdshader`:
 
 ```glsl
@@ -454,26 +468,19 @@ void fragment() {
 
 ## The scene script
 
-`main.gd` on the root `Node3D`, in the order it runs. The example's names, captions and layout are
-data. Replace them with your game's.
+Pieces of `main.gd`, verbatim. Positions, names and caption text are the game's.
 
-The palette (the day scheme of `example-palette.gpl`), its lighting numbers and the constants:
+Constants: the palette, the lighting scheme that belongs to it, the camera and the sprite size:
 
 ```gdscript
 extends Node3D
-## Port of pixel-sprites-lit-diorama/demo.html?frame=key-scene (day palette, animation time 2.0 s).
-## Geometry is built the way three.js builds it (same vertices, normals and UVs), so the toon bands
-## and the world-unit texel grid land where the web frame has them.
 
 const W := 1280.0
 const H := 720.0
 const T := 2.0
-const P := {
-	"sky": "#9CC8E8", "fog": "#C9DCE6", "key": "#FFF1D8", "fill-sky": "#CFE2F2", "fill-ground": "#8A7A66", "rim": "#FFFFFF",
-	"glow-lamp": "#FFE2A8", "ground": "#B9A58A",
-	"material-plaster": "#C8B8A0", "material-roof": "#B07052", "material-wood": "#8A6448", "material-stone": "#9A968C",
-	"material-leaf": "#6E9450", "material-cloth": "#4F7FA8", "material-cloth2": "#BFA060",
-	"outline": "#221C24", "tint": "#FFF6EA", "accent": "#19C2A0", "ink": "#F6F1E6", "plate": "#1C1820", "white": "#FFFFFF",
+const P := {   # every colour role in style.md, from your palette, for example:
+	"fog": "#C9DCE6", "key": "#FFF1D8", "fill-sky": "#CFE2F2", "fill-ground": "#8A7A66", "rim": "#FFFFFF",
+	# ... sky, glow-*, ground, material-*, outline, tint, accent, ink, plate, white
 }
 ## The lighting scheme belongs to the palette (demo.html's "light" block).
 const L := {"key": 2.8, "key_pos": Vector3(-9, 14, 7), "hemi": 1.25, "rim": 0.4, "rim_pos": Vector3(7, 9, -12),
@@ -498,34 +505,28 @@ var S_ADD := preload("res://shaders/additive.gdshader")
 var S_MIST := preload("res://shaders/mist.gdshader")
 ```
 
-Helpers: mulberry32 (the demo's seeded random), colour conversions, and a three.js-style geometry record turned into an `ArrayMesh`:
+`rnd` and `Rng.new(seed)` below are a seeded random with `next()` in [0, 1). The port uses a copy of
+the demo's mulberry32 so its draws match; a game can wrap Godot's `RandomNumberGenerator` (`seed`,
+`randf()`).
+
+Colour helpers and a three.js-style geometry record turned into an `ArrayMesh`:
 
 ```gdscript
-# ------------------------------------------------------------------ helpers
-class Rng:   # mulberry32, as the web demo seeds it
-	var s: int
-	func _init(seed_value: int) -> void: s = seed_value & 0xFFFFFFFF
-	static func imul(x: int, y: int) -> int:
-		return ((x & 0xFFFF) * y + ((((x >> 16) * y) & 0xFFFF) << 16)) & 0xFFFFFFFF
-	func next() -> float:
-		s = (s + 0x6D2B79F5) & 0xFFFFFFFF
-		var t := imul(s ^ (s >> 15), 1 | s)
-		t = ((t + imul(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t
-		return float((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
-
 class Geo:   # three.js-style geometry: CCW triangles, UV v up
 	var v := []
 	var n := []
 	var uv := []
 	var i := []
 
-var rnd := Rng.new(20261107)
 func col(role: String) -> Color: return Color(P[role])
+
 func lin(c: Color) -> Vector3:
 	var l := c.srgb_to_linear()
 	return Vector3(l.r, l.g, l.b)
+
 ## three.js Color(a).lerp(Color(b), t).getHexString(): mixed in linear, stored as 8-bit sRGB
 func srgb(v: Vector3) -> Color: return Color(v.x, v.y, v.z).linear_to_srgb()   # for source_color uniforms
+
 func hex_mix(a: Color, b: Color, t: float) -> Color:
 	var m := a.srgb_to_linear().lerp(b.srgb_to_linear(), t).linear_to_srgb()
 	return Color8(roundi(m.r * 255), roundi(m.g * 255), roundi(m.b * 255))
@@ -546,10 +547,10 @@ func to_mesh(g: Geo, lines := false) -> ArrayMesh:
 	return m
 ```
 
-Boxes, planes, cylinders and cones, icosahedra and rings, built as three.js builds them (same vertex order, normals and UVs):
+Boxes with per-face UVs (0–1 per face for grain, or world units for the value maps), planes, the
+open cylinder (backdrop arcs, 4-sided roofs, trunks):
 
 ```gdscript
-# ------------------------------------------------------------------ three.js geometries
 func _plane(g: Geo, u: int, v: int, w: int, udir: float, vdir: float, width: float, height: float, depth: float) -> void:
 	var s := g.v.size()
 	for iy in 2:
@@ -614,55 +615,17 @@ func cyl_geo(rt: float, rb: float, h: float, rs: int, open_ended := false, ts :=
 				else: g.i.append_array([c1 + x + 1, c1 + x, c0 + x])
 	return g
 
-func icosa_geo(r: float, detail := 0) -> Geo:
-	var t := (1.0 + sqrt(5.0)) / 2.0
-	var vs := [Vector3(-1, t, 0), Vector3(1, t, 0), Vector3(-1, -t, 0), Vector3(1, -t, 0), Vector3(0, -1, t), Vector3(0, 1, t),
-		Vector3(0, -1, -t), Vector3(0, 1, -t), Vector3(t, 0, -1), Vector3(t, 0, 1), Vector3(-t, 0, -1), Vector3(-t, 0, 1)]
-	var ix := [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
-		3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1]
-	var tris := []
-	var cols := detail + 1
-	for f in range(0, ix.size(), 3):   # three.js PolyhedronGeometry.subdivideFace
-		var a: Vector3 = vs[ix[f]]; var b: Vector3 = vs[ix[f + 1]]; var c: Vector3 = vs[ix[f + 2]]
-		var grid := []
-		for i in cols + 1:
-			var aj := a.lerp(c, float(i) / cols); var bj := b.lerp(c, float(i) / cols); var rows := cols - i
-			var row := []
-			for j in rows + 1: row.append(aj if (j == 0 and i == cols) else aj.lerp(bj, float(j) / rows))
-			grid.append(row)
-		for i in cols:
-			for j in 2 * (cols - i) - 1:
-				var k := j / 2
-				if j % 2 == 0: tris.append_array([grid[i][k + 1], grid[i + 1][k], grid[i][k]])
-				else: tris.append_array([grid[i][k + 1], grid[i + 1][k + 1], grid[i + 1][k]])
-	var g := Geo.new()
-	for k in range(0, tris.size(), 3):
-		var p := [tris[k].normalized() * r, tris[k + 1].normalized() * r, tris[k + 2].normalized() * r]
-		var fn: Vector3 = (p[2] - p[1]).cross(p[0] - p[1]).normalized()
-		for q in 3:
-			var v: Vector3 = p[q]
-			g.v.append(v); g.n.append(fn if detail == 0 else v.normalized())
-			g.uv.append(Vector2(atan2(v.z, -v.x) / TAU + 0.5, atan2(-v.y, Vector2(v.x, v.z).length()) / PI + 0.5))
-			g.i.append(g.v.size() - 1)
-	return g
-
-func ring_geo(ri: float, ro: float, segs: int) -> Geo:   # RingGeometry, rotated flat
-	var g := Geo.new()
-	for j in 2:
-		var r := ri + j * (ro - ri)
-		for i in segs + 1:
-			var th := float(i) / segs * TAU
-			g.v.append(Vector3(r * cos(th), 0, -r * sin(th))); g.n.append(Vector3.UP); g.uv.append(Vector2(0, 0))
-	for i in segs:
-		var a := i; var b := i + segs + 1; var c := i + segs + 2; var d := i + 1
-		g.i.append_array([a, b, d, b, c, d])
+## a 4-sided roof whose UVs run in world units: tiles across, rows up the slope
+func roof_cone(r: float, h: float) -> Geo:
+	var g := cyl_geo(0, r, h, 4)
+	var around := 4 * r * sqrt(2.0); var up := Vector2(h, r * 0.71).length()
+	for k in g.uv.size(): g.uv[k] = Vector2(g.uv[k].x * around / TILE.roof, g.uv[k].y * up / TILE.roof)
 	return g
 ```
 
-The brushy grain, the awning stripes and the painted sky, drawn like the web demo's 2D canvases:
+The brushy grain (900 short pale strokes on white, each blended at 35% over what is there):
 
 ```gdscript
-# ------------------------------------------------------------------ textures drawn in code
 ## brushy grain: short pale strokes on white (canvas fillRect at 35% over the last result)
 func grain_image(seed_value: int, w := 128, h := 128, n := 900) -> Image:
 	var r := Rng.new(seed_value)
@@ -681,72 +644,11 @@ func grain_image(seed_value: int, w := 128, h := 128, n := 900) -> Image:
 func tex_from(img: Image, mipmaps := true) -> ImageTexture:
 	if mipmaps: img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
-
-## awning stripes in two set roles, grain multiplied on top
-func awning_image(a: String, b: String) -> Image:
-	var grain := grain_image(3, 128, 64, 400)
-	var img := Image.create(128, 64, false, Image.FORMAT_RGB8)
-	for y in 64:
-		for x in 128:
-			var c := col(b if (x / 16) % 2 == 1 else a); var gv := grain.get_pixel(x, y).r8
-			img.set_pixel(x, y, Color8(roundi(c.r8 * gv / 255.0), roundi(c.g8 * gv / 255.0), roundi(c.b8 * gv / 255.0)))
-	return img
-
-## the painted backdrop: gradient sky, a halo round the key, 70 brushy cloud strokes, two layers of far
-## hills, fog below the horizon. Composited in sRGB like a 2D canvas.
-var sky_buf := PackedFloat32Array()
-func _blend(x: int, y: int, c: Color, a: float) -> void:
-	var k := (y * 1024 + x) * 3
-	sky_buf[k] = sky_buf[k] * (1 - a) + c.r * a; sky_buf[k + 1] = sky_buf[k + 1] * (1 - a) + c.g * a; sky_buf[k + 2] = sky_buf[k + 2] * (1 - a) + c.b * a
-
-func sky_image() -> Image:
-	var w := 1024; var h := 512; var hz := h * 0.58
-	sky_buf.resize(w * h * 3)
-	var sky := col("sky"); var fogc := col("fog"); var key := col("key")
-	var low := hex_mix(sky, fogc, 0.85)
-	for y in h:
-		var c := sky.lerp(low, clampf((y + 0.5) / hz, 0, 1))
-		for x in w:
-			var k := (y * w + x) * 3; sky_buf[k] = c.r; sky_buf[k + 1] = c.g; sky_buf[k + 2] = c.b
-	var hot := hex_mix(key, Color.WHITE, 0.3)
-	for y in range(50, 250):
-		for x in range(540, 740):
-			var om := (Vector2(x + 0.5 - 640, y + 0.5 - 150).length() - 4.0) / 86.0
-			if om > 1.0: continue
-			om = maxf(om, 0.0)
-			if om < 0.18: _blend(x, y, hot.lerp(key, om / 0.18), 0.85)
-			else: _blend(x, y, key, 0.85 * (1.0 - (om - 0.18) / 0.82))
-	var r := Rng.new(5)
-	var cloud := hex_mix(sky, fogc, 0.7)
-	for n in 70:
-		var ga := 0.12 + r.next() * 0.18
-		var c := hex_mix(cloud, key, r.next() * 0.35)
-		var cx := r.next() * w; var cy := 40 + r.next() * (hz - 120); var rx := 30 + r.next() * 90; var ry := 5 + r.next() * 9
-		for y in range(maxi(0, floori(cy - ry - 1)), mini(h, ceili(cy + ry + 1))):
-			for x in range(maxi(0, floori(cx - rx - 1)), mini(w, ceili(cx + rx + 1))):
-				var dx := (x + 0.5 - cx) / rx; var dy := (y + 0.5 - cy) / ry; var q := sqrt(dx * dx + dy * dy)
-				var grad := sqrt(dx * dx / (rx * rx) + dy * dy / (ry * ry)) / maxf(q, 1e-4)
-				var cov := clampf(0.5 - (q - 1.0) / maxf(grad, 1e-4), 0, 1)
-				if cov > 0: _blend(x, y, c, ga * cov)
-	for layer in [[0.006, 46.0, hex_mix(fogc, sky, 0.35)], [0.011, 30.0, hex_mix(fogc, col("outline"), 0.12)]]:
-		var k: float = layer[0]; var amp: float = layer[1]; var c: Color = layer[2]
-		var knots := []
-		for i in range(0, w + 1, 8): knots.append(hz - amp * (0.55 + 0.45 * sin(i * k + amp) * sin(i * k * 2.3)))
-		for x in w:
-			var xc := x + 0.5; var s := int(xc / 8.0)
-			var top: float = lerpf(knots[s], knots[s + 1], (xc - s * 8) / 8.0)
-			for y in range(maxi(0, floori(top)), h): _blend(x, y, c, clampf(y + 1 - top, 0, 1))
-	for y in range(int(hz), h):
-		for x in w: _blend(x, y, fogc, clampf(y + 1 - hz, 0, 1))
-	var bytes := PackedByteArray(); bytes.resize(w * h * 3)
-	for k in w * h * 3: bytes[k] = clampi(roundi(sky_buf[k] * 255.0), 0, 255)
-	return Image.create_from_data(w, h, false, Image.FORMAT_RGB8, bytes)
 ```
 
 Materials: one toon `ShaderMaterial` per role and map, cached:
 
 ```gdscript
-# ------------------------------------------------------------------ materials
 var grain_tex: ImageTexture
 var TEX := {}
 var mats := {}
@@ -781,6 +683,7 @@ func paint(role: String, map = null, key := "", shader: Shader = null) -> Shader
 	light_params(m)
 	mats[key] = m
 	return m
+
 func M(r: String) -> ShaderMaterial: return paint("material-" + r)
 const SURF := {"plaster": "plaster", "stone": "plaster", "wood": "wood", "roof": "roof"}
 func MT(r: String) -> ShaderMaterial: return paint("material-" + r, SURF[r], "tex-" + r)
@@ -792,11 +695,11 @@ func flat(shader: Shader, c: Color, extra := {}) -> ShaderMaterial:
 	return m
 ```
 
-Scene helpers, as in the demo (`mesh`, `box`, `blob`, `lamp`, `stall`, `bunting`, `planter`, `tree`, `roof_cone`):
+Placing pieces, and the contact blob:
 
 ```gdscript
-# ------------------------------------------------------------------ scene helpers
 var world: Node3D
+
 func mesh(g: Geo, m: Material, x: float, y: float, z: float, parent: Node3D = null, shadow := true) -> MeshInstance3D:
 	var mi := MeshInstance3D.new(); mi.mesh = to_mesh(g); mi.material_override = m
 	mi.position = Vector3(x, y, z)
@@ -810,6 +713,7 @@ func box(w: float, h: float, d: float, m: ShaderMaterial, x: float, y: float, z:
 	return mesh(g, m, x, y + h / 2, z, parent)
 
 var blob_quad: ArrayMesh
+
 func blob(x: float, z: float, r: float, parent: Node3D = null) -> MeshInstance3D:
 	var mi := MeshInstance3D.new(); mi.mesh = blob_quad
 	mi.material_override = flat(S_BLOB, col("outline"))
@@ -817,81 +721,14 @@ func blob(x: float, z: float, r: float, parent: Node3D = null) -> MeshInstance3D
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	(parent if parent else world).add_child(mi)
 	return mi
-
-func lamp(x: float, y: float, z: float) -> void:
-	var g := Node3D.new(); g.position = Vector3(x, y, z); world.add_child(g)
-	box(0.05, 0.25, 0.05, M("wood"), 0, 0.18, 0, g)
-	box(0.34, 0.06, 0.34, M("wood"), 0, 0.16, 0, g).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mesh(icosa_geo(0.16), flat(S_UNLIT, srgb(lin(col("glow-lamp")) * 0.8)), 0, 0, 0, g, false)   # unlit core (dim by day)
-
-var stalls := {}
-func stall(id: String, x: float, z: float, stripe_a: String, stripe_b: String, goods: Callable) -> void:
-	var g := Node3D.new(); g.position = Vector3(x, 0, z); world.add_child(g)
-	box(2.4, 0.95, 0.9, MT("wood"), 0, 0, 0, g)
-	box(2.56, 0.08, 1.02, MT("wood"), 0, 0.95, 0, g)
-	for sx in [-1.15, 1.15]:
-		box(0.1, 2.5, 0.1, MT("wood"), sx, 0, -0.42, g); box(0.1, 2.05, 0.1, MT("wood"), sx, 0, 0.42, g)
-	var aw := mesh(plane_geo(2.9, 1.6), paint("white", tex_from(awning_image(stripe_a, stripe_b)), "awning-" + id, S_TOON2), 0, 2.3, 0.1, g)
-	aw.rotation.x = -PI / 2 + 0.45
-	goods.call(g)
-	# the painted sign board on the counter's front (generated pixel art), no mipmaps
-	var sign_tex: Texture2D = load("res://assets/signs/%s.png" % id)
-	mesh(plane_geo(1.2, 0.6), paint("white", sign_tex, "sign-" + id, S_CUT), 0, 0.5, 0.46, g, false)
-	blob(0, 0, 1.6, g).scale = Vector3(1.6, 1, 1.6 * 0.55)
-	stalls[id] = {"g": g, "anchor": Vector3(x, 2.95, z)}
-
-func fruit(g: Node3D, role: String, n: int, y := 1.12) -> void:
-	for i in n:
-		mesh(icosa_geo(0.12), M(role), -0.95 + (i % 9) * 0.24, y + (i / 9) * 0.05, 0.25 - (i / 9) * 0.26, g)
-
-func bunting(a: Vector3, b: Vector3, sag: float, n: int, roles: Array) -> void:
-	var pts := []
-	for i in n + 1:
-		var t := float(i) / n
-		pts.append(a.lerp(b, t) + Vector3(0, -sag * 4 * t * (1 - t), 0))
-	var lg := Geo.new(); lg.v = pts
-	var line := MeshInstance3D.new(); line.mesh = to_mesh(lg, true); line.material_override = flat(S_UNLIT, col("outline"))
-	line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; world.add_child(line)
-	for i in n:
-		var p0: Vector3 = pts[i]; var p1: Vector3 = pts[i + 1]; var mid := p0.lerp(p1, 0.5)
-		var A := p0.lerp(mid, 0.15); var B := p1.lerp(mid, 0.15); var C := mid + Vector3(0, -0.34, 0.02)
-		var fn := (C - B).cross(A - B).normalized()
-		var g := Geo.new(); g.v = [A, B, C]; g.n = [fn, fn, fn]; g.uv = [Vector2.ZERO, Vector2.ZERO, Vector2.ZERO]; g.i = [0, 1, 2]
-		var role: String = roles[i % roles.size()]
-		var m := paint("material-" + role, null, "flag-" + role, S_TOON2)
-		m.set_shader_parameter("grain_corner", true)   # no UVs in the web demo: one grain texel
-		mesh(g, m, 0, 0, 0)
-
-func planter(x: float, z: float, w: float, d: float) -> void:
-	box(w, 0.55, d, MT("wood"), x, 0, z)
-	var r := maxf(w, d) * 0.62
-	blob(x, z, r).scale = Vector3(r * (1.0 if w > d else 0.5), 1, r * (0.5 if w > d else 1.0))
-	var n := roundi(maxf(w, d) / 0.55)
-	for i in n:
-		var t := (i + 0.5) / n - 0.5
-		var leaf := mesh(icosa_geo(0.32 + rnd.next() * 0.08), M("leaf"), x + (t * w if w > d else 0.0), 0.72, z + (0.0 if w > d else t * d))
-		leaf.scale = Vector3(1, 0.75, 1)
-
-func tree(x: float, z: float, s := 1.0) -> void:
-	mesh(cyl_geo(0.38 * s, 0.3 * s, 0.6 * s, 8), M("roof"), x, 0.3 * s, z)
-	mesh(cyl_geo(0.07, 0.09, 1.2 * s, 6), M("wood"), x, 0.9 * s, z)
-	mesh(icosa_geo(0.85 * s), M("leaf"), x, 1.85 * s, z).scale = Vector3(1, 0.85, 1)
-	blob(x, z, 0.9 * s)
-
-## a 4-sided roof whose UVs run in world units: tiles across, rows up the slope
-func roof_cone(r: float, h: float) -> Geo:
-	var g := cyl_geo(0, r, h, 4)
-	var around := 4 * r * sqrt(2.0); var up := Vector2(h, r * 0.71).length()
-	for k in g.uv.size(): g.uv[k] = Vector2(g.uv[k].x * around / TILE.roof, g.uv[k].y * up / TILE.roof)
-	return g
 ```
 
 The cast: pixel sprites on yaw-only billboards:
 
 ```gdscript
-# ------------------------------------------------------------------ the cast
 var people := {}
 var cam: Camera3D
+
 func first_row(img: Image) -> int:
 	for y in CH:
 		for x in CW:
@@ -911,10 +748,9 @@ func person(id: String, x: float, z: float, face := 1.0) -> void:
 	people[id] = {"id": id, "x": x, "z": z, "mi": mi, "top": top, "anchor": Vector3(x, (FEET + 1 - top) * PX, z)}
 ```
 
-Building the set, the town, the valley, the backdrop, shafts, mist and cast, then the lights, camera, environment and post:
+Start-up: the shared textures and the blob quad, then your set, then the atmosphere:
 
 ```gdscript
-# ------------------------------------------------------------------ build
 func _ready() -> void:
 	grain_tex = tex_from(grain_image(7))
 	for k in [["floor", "floor-tiles"], ["roof", "roof-tiles"], ["plaster", "plaster"], ["wood", "wood-planks"]]:
@@ -926,60 +762,7 @@ func _ready() -> void:
 	bq.i = [0, 2, 1, 2, 3, 1]
 	blob_quad = to_mesh(bq)
 	world = Node3D.new(); add_child(world)
-
-	box(15, 0.3, 10, paint("ground", "floor", "ground-tiles"), 0, -0.3, -0.5)     # the terrace floor
-	box(15.2, 8, 10.2, MT("plaster"), 0, -8.3, -0.5)                               # the building under it
-	for y in [-2.6, -5.6]:
-		var x := -6.0
-		while x <= 6.01:
-			box(0.8, 1.1, 0.06, paint("outline"), x, y, 4.62); x += 2.4
-	box(15, 0.6, 0.3, MT("plaster"), 0, 0, -5.35)                                 # parapet, back and sides
-	for sx in [-7.35, 7.35]: box(0.3, 0.6, 9.7, MT("plaster"), sx, 0, -0.5)
-
-	stall("seed", -4.4, -3.3, "material-cloth2", "material-plaster", func(g: Node3D) -> void:
-		for i in 4: box(0.42, 0.24, 0.42, MT("wood"), -0.8 + i * 0.53, 0.99, 0.05, g)
-		for i in 3: mesh(icosa_geo(0.34, 1), M("cloth2"), -1.6 + i * 0.4, 0.26, 0.8 + (i % 2) * 0.2, g).scale = Vector3(1, 0.75, 1))
-	stall("fig", 0.3, -3.3, "material-cloth", "material-plaster", func(g: Node3D) -> void:
-		fruit(g, "roof", 18); fruit(g, "cloth2", 6, 1.2))
-	stall("herb", 4.8, -3.3, "material-leaf", "material-plaster", func(g: Node3D) -> void:
-		for i in 5:
-			box(0.3, 0.2, 0.3, M("roof"), -0.9 + i * 0.45, 0.99, 0.1, g)
-			mesh(icosa_geo(0.2), M("leaf"), -0.9 + i * 0.45, 1.36, 0.1, g))
-	lamp(1.55, 1.85, -2.75)
-	box(0.06, 0.06, 0.4, M("wood"), 1.45, 2.05, -2.8)
-	lamp(-5.7, 1.7, -2.75); lamp(6.1, 1.7, -2.75)
-
-	for x in [-7.15, 7.15]: box(0.12, 3.3, 0.12, MT("wood"), x, 0, -5.2)
-	box(0.12, 3.0, 0.12, MT("wood"), -2.05, 0, -5.2); box(0.12, 3.0, 0.12, MT("wood"), 2.55, 0, -5.2)
-	var flags := ["cloth", "cloth2", "roof", "plaster", "leaf"]
-	bunting(Vector3(-7.15, 3.25, -5.2), Vector3(-2.05, 2.95, -5.2), 0.35, 11, flags)
-	bunting(Vector3(-2.05, 2.95, -5.2), Vector3(2.55, 2.95, -5.2), 0.3, 10, flags.slice(2) + flags.slice(0, 2))
-	bunting(Vector3(2.55, 2.95, -5.2), Vector3(7.15, 3.25, -5.2), 0.35, 11, flags)
-
-	planter(-6.5, 1.6, 0.6, 3.0); planter(6.5, 1.6, 0.6, 3.0); planter(-1.4, 3.7, 1.8, 0.55)
-	tree(-6.2, -4.7); tree(6.3, -4.7, 1.1); tree(6.0, 3.6, 0.8)
-	box(0.5, 0.5, 0.5, MT("wood"), -2.1, 0, -2.5); box(0.38, 0.38, 0.38, MT("wood"), -2.05, 0.5, -2.5).rotation.y = 0.5
-	box(0.5, 0.5, 0.5, MT("wood"), 2.9, 0, -2.3).rotation.y = -0.3; blob(-2.1, -2.5, 0.5); blob(2.9, -2.3, 0.5)
-	box(1.7, 0.42, 0.5, MT("wood"), -2.6, 0, 1.9); blob(-2.6, 1.9, 1.0).scale = Vector3(1.0, 1, 0.45)
-
-	# the hill town falling away behind and beside the terrace (same seeded draws as the web demo)
-	var town := Node3D.new(); world.add_child(town)
-	for row in 4:
-		var z := -9.5 - row * 6.5; var base := -4 - row * 3.6
-		var x := -26 + rnd.next() * 3
-		while x < 26:
-			var w := 3 + rnd.next() * 1.6; var d := 3.4 + rnd.next() * 1.4; var h := 3.2 + rnd.next() * 2.4
-			var walls := MT("plaster") if rnd.next() < 0.7 else MT("stone")
-			var zz := z + rnd.next() * 1.5
-			box(w, h, d, walls, x, base, zz, town)
-			var roof := mesh(roof_cone(maxf(w, d) * 0.74, 1.4 + rnd.next() * 0.6), MT("roof"), x, base + h + 0.75, zz, town)
-			roof.rotation.y = PI / 4; roof.scale = Vector3(w / maxf(w, d), 1, d / maxf(w, d))
-			x += 4.2 + rnd.next() * 2
-	for side in [-1, 1]:
-		for i in 4:
-			var x: float = side * (11 + i * 4.5 + rnd.next() * 1.5); var z := -3 + rnd.next() * 7; var base := -9 - i * 1.5; var h := 6 + rnd.next() * 2
-			box(3.6, h, 3.8, MT("plaster"), x, base, z, town)
-			mesh(roof_cone(2.7, 1.6), MT("roof"), x, base + h + 0.8, z, town).rotation.y = PI / 4
+	# ... your set: box(), mesh(), blob() and person() calls
 
 	# the animated banded valley surface
 	var valley := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2(320, 180)
@@ -1014,15 +797,13 @@ func _ready() -> void:
 		var sc := 9 + rnd.next() * 7; var ph := rnd.next() * 6
 		var s := mesh(mist_geo, flat(S_MIST, col("fog"), {"opacity": L.mist}), x + sin(T * 0.05 + ph) * 2, y, z, self, false)
 		s.scale = Vector3(sc, sc, sc)
+	# ... then the selection ring, build_env(), build_post(), build_captions() and select()
+```
 
-	person("vendor", 0.0, -3.95); person("shopper", 1.2, -1.7, -1); person("elder", -4.6, 0.6); person("kid", 3.4, 1.4, -1)
-	ring = mesh(ring_geo(0.5, 0.64, 48), flat(S_ADD, col("accent")), 0, 0.02, 0, world, false)
-	build_env()
-	build_post()
-	build_captions()
-	select("shopper")
+`sky_image()` is your painted backdrop (see the import settings). The key light, the environment
+and the camera, then the post chain:
 
-var ring: MeshInstance3D
+```gdscript
 func build_env() -> void:
 	var key := DirectionalLight3D.new()
 	key.light_color = col("key")
@@ -1061,31 +842,15 @@ func grade_tint() -> Vector3:
 	var f := lin(col("fill-ground")); return f / maxf(f.x, maxf(f.y, f.z))
 ```
 
-Captions: measured like CSS, placed by the recipe's layout (above, sliding out, beside, below; selected person first, then the stall in focus):
+Captions. The fonts: names in 17 px bold small capitals with 1 px letter spacing, the status line
+in 16 px italic, both drawn on a `Control` in their own `CanvasLayer` above the post (`EMBOLDEN` was
+tuned to match Chrome's heavier light-on-dark text; keep it if your captions look thin):
 
 ```gdscript
-# ------------------------------------------------------------------ captions: live text placed by the recipe's layout
-const CAPS := {
-	"shopper": ["Tomasina Ferreira-Valcourt", "Tomasina", "Wants six pots of rosemary; pays double before the rain"],
-	"vendor": ["Mira, the fig seller", "Mira", "Her figs spoil if the rain reaches them"],
-	"elder": ["Old Anselm", "Anselm", "Knows which clouds bring rain; ask him before noon"],
-	"kid": ["Pip", "Pip", "Will carry a message for two coins"],
-	"fig": ["Fig and apricot stall", "Figs", "Uncovered · 18 baskets left"],
-	"herb": ["Herb and tea stall", "Herbs", "Rosemary: 4 pots, two short of the order"],
-	"seed": ["Seed and bulb stall", "Seeds", "Closed until the delivery"],
-}
-const SHOWN := ["shopper", "elder", "fig"]
-const FOCUS_STALL := "fig"
-const MAX_FULL := 4
-const MAX_W := 240.0
-const PAD := Vector4(9, 3, 9, 4)   # left, top, right, bottom
 var f_name: FontVariation
 var f_line: FontVariation
 const EMBOLDEN := 0.35        # Chrome on Windows draws this light-on-dark text heavier than FreeType
-const BASELINE_SHIFT := 2.0   # Chrome places the baseline 2 px lower than the hhea-centred line box
 var cap_layer: Control
-var placed_caps := []
-var selected := "shopper"
 
 func build_captions() -> void:
 	var names := PackedStringArray(["Palatino Linotype", "Book Antiqua", "Palatino", "Georgia", "serif"])
@@ -1100,47 +865,16 @@ func build_captions() -> void:
 	cap_layer = Control.new(); cap_layer.set_anchors_preset(Control.PRESET_FULL_RECT); cap_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(cap_layer)
 	cap_layer.draw.connect(draw_captions)
+```
 
-func wrap_text(text: String, font: Font, size: int, width: float) -> Array:   # breaks after spaces and hyphens
-	var words := []
-	var cur := ""
-	for ch in text:
-		cur += ch
-		if ch == " " or ch == "-":
-			words.append(cur); cur = ""
-	if cur != "": words.append(cur)
-	var lines := []; var line := ""
-	for w in words:
-		var tryline: String = line + w
-		if line != "" and font.get_string_size(tryline.strip_edges(false, true), HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > width:
-			lines.append(line.strip_edges(false, true)); line = w
-		else: line = tryline
-	lines.append(line.strip_edges(false, true))
-	return lines
+The layout, each time the selection or the camera changes, follows recipe.md's Interface steps:
+obstacles are every sprite's drawn rectangle (head top to feet, 0.6 of its height wide, projected
+with `cam.unproject_position`) and every captioned prop's projected bounding box (soft); captions
+are placed in priority order (selected person, prop in focus, the rest), the first `MAX_FULL = 4`
+full and the rest as a short name, each at most 240 px wide with 3 × 9 px padding and line height
+1.2. The search for a free spot:
 
-func measure(id: String, short: bool) -> Dictionary:
-	var inner := MAX_W - PAD.x - PAD.z
-	var b := wrap_text(CAPS[id][1] if short else CAPS[id][0], f_name, 17, inner)
-	var i := [] if short else wrap_text(CAPS[id][2], f_line, 16, inner)
-	# shrink-to-fit: the unwrapped (max-content) width, capped; a caption that wraps takes the full 240 px
-	var widest := f_name.get_string_size(CAPS[id][1] if short else CAPS[id][0], HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
-	if not short: widest = maxf(widest, f_line.get_string_size(CAPS[id][2], HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x)
-	var w := minf(MAX_W, ceilf(widest) + PAD.x + PAD.z)
-	var h := PAD.y + PAD.w + b.size() * 17 * 1.2 + i.size() * 16 * 1.2   # line-height 1.2
-	return {"id": id, "b": b, "i": i, "w": w, "h": h}
-
-func to_screen(p: Vector3) -> Vector2: return cam.unproject_position(p)
-func sprite_rect(q: Dictionary) -> Rect2:   # the drawn figure: head top to feet, 0.6 of its height wide
-	var top := to_screen(Vector3(q.x, (FEET + 1 - q.top) * PX, q.z)); var foot := to_screen(Vector3(q.x, 0, q.z))
-	var h := foot.y - top.y; var w := h * 0.6
-	return Rect2(top.x - w / 2, top.y, w, h)
-func stall_rect(id: String) -> Rect2:
-	var g: Vector3 = stalls[id].g.position; var lo := Vector2(1e9, 1e9); var hi := Vector2(-1e9, -1e9)
-	for dx in [-1.45, 1.45]:
-		for dy in [0.0, 2.7]:
-			for dz in [-0.6, 0.9]:
-				var p := to_screen(g + Vector3(dx, dy, dz)); lo = lo.min(p); hi = hi.max(p)
-	return Rect2(lo, hi - lo)
+```gdscript
 func hits(a: Rect2, b: Rect2, gap: float) -> bool:
 	return a.position.x < b.end.x + gap and b.position.x < a.end.x + gap and a.position.y < b.end.y + gap and b.position.y < a.end.y + gap
 
@@ -1163,88 +897,14 @@ func find_spot(anc: Vector2, own: Rect2, w: float, h: float, B: Rect2, placed: A
 		var r := Rect2(t, Vector2(w, h))
 		if ok.call(r): return r
 	return null
-
-func layout_captions() -> void:
-	var B := Rect2(12, 12, W - 24, H - 24)
-	var sprites := []; var sprite_of := {}
-	for id in people:
-		var r := sprite_rect(people[id]); sprites.append(r); sprite_of[id] = r
-	var stall_of := {}
-	for id in stalls: stall_of[id] = stall_rect(id)
-	var order := CAPS.keys()
-	var live := SHOWN.duplicate()
-	live.sort_custom(func(a, b): return rank(a, order) < rank(b, order))
-	placed_caps = []; var placed := []; var full := 0
-	for id in live:
-		var own: Rect2 = sprite_of[id] if people.has(id) else stall_of[id]
-		var others := []
-		for s in stall_of:
-			if s != id: others.append(stall_of[s])
-		var anc := to_screen(people[id].anchor if people.has(id) else stalls[id].anchor)
-		for short in ([false, true] if full < MAX_FULL else [true]):
-			var m := measure(id, short); var w := roundf(m.w); var h := roundf(m.h)   # offsetWidth/Height
-			var spot = find_spot(anc, own, w, h, B, placed, sprites, []) if id == selected \
-				else find_spot(anc, own, w, h, B, placed, sprites, others)
-			if spot == null and id != selected: spot = find_spot(anc, own, w, h, B, placed, sprites, [])
-			if spot != null:
-				if not short: full += 1
-				m.pos = Vector2(roundf(spot.position.x), roundf(spot.position.y)); m.w = w; m.h = h   # snapped to pixels
-				placed_caps.append(m); placed.append(spot)
-				break
-	cap_layer.queue_redraw()
-
-func rank(id: String, order: Array) -> int: return -2 if id == selected else (-1 if id == FOCUS_STALL else order.find(id))
-
-var glow_boxes := []
-func draw_captions() -> void:
-	var plate := col("plate")
-	if glow_boxes.is_empty():   # box-shadow 0 0 10px 2px plate at 60%: 1 px rings outside the box
-		for k in 14:
-			var s := StyleBoxFlat.new(); s.draw_center = false; s.set_border_width_all(1); s.set_corner_radius_all(5 + k)
-			s.set_expand_margin_all(k + 1)
-			var a := 0.6 * 0.5 * (1.0 - erf_approx((k + 0.5 - 2.0) / (5.0 * sqrt(2.0))))
-			s.border_color = Color(plate, a); glow_boxes.append(s)
-	var bg := StyleBoxFlat.new(); bg.bg_color = Color(plate, 0.85); bg.set_corner_radius_all(4)
-	for c in placed_caps:
-		var r := Rect2(c.pos, Vector2(c.w, c.h))
-		for s in glow_boxes: cap_layer.draw_style_box(s, r)
-		cap_layer.draw_style_box(bg, r)
-		var y: float = c.pos.y + PAD.y
-		var inner: float = c.w - PAD.x - PAD.z
-		for s in c.b:
-			text_line(s, f_name, 17, c.pos.x + PAD.x, inner, y, col("accent") if c.id == selected else col("ink")); y += 17 * 1.2
-		for s in c.i:
-			text_line(s, f_line, 16, c.pos.x + PAD.x, inner, y, col("ink")); y += 16 * 1.2
-
-## one centred line in a CSS line box: the font's content area centred in line-height 1.2
-func text_line(s: String, f: Font, size: int, x: float, inner: float, top: float, c: Color) -> void:
-	var lw := f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	var asc := f.get_ascent(size); var desc := f.get_descent(size)
-	var base := roundf(top + (size * 1.2 - (asc + desc)) / 2 + asc + BASELINE_SHIFT)
-	cap_layer.draw_string(f, Vector2(x + (inner - lw) / 2, base), s, HORIZONTAL_ALIGNMENT_LEFT, -1, size, c)
-
-func erf_approx(x: float) -> float:   # Abramowitz-Stegun 7.1.26
-	var s := signf(x); x = absf(x)
-	var t := 1.0 / (1.0 + 0.3275911 * x)
-	var y := 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x)
-	return s * y
 ```
 
-Selection: a click picks a townsperson through invisible hit spheres, never the caption text:
+Each caption is drawn with `draw_style_box`: a `StyleBoxFlat` in `plate` at 85% with 4 px corners,
+and around it the soft glow (`plate` at 60%, about 10 px) as 14 one-pixel border rings at
+expand margins 1 to 14, fading out. Names are `accent` on the selected person and `ink` otherwise;
+lines are centred in the box.
 
-```gdscript
-# ------------------------------------------------------------------ selection (click a townsperson)
-func select(id: String) -> void:
-	selected = id; ring.position = Vector3(people[id].x, 0.02, people[id].z)
-	layout_captions()
-
-func _unhandled_input(e: InputEvent) -> void:
-	if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-		var o := cam.project_ray_origin(e.position); var d := cam.project_ray_normal(e.position)
-		var best := ""; var best_t := INF
-		for id in people:   # generous invisible hit spheres (r 0.75 at chest height), never the caption text
-			var c := Vector3(people[id].x, 0.9, people[id].z); var oc := o - c
-			var b := oc.dot(d); var disc := b * b - (oc.length_squared() - 0.75 * 0.75)
-			if disc >= 0 and -b - sqrt(disc) < best_t: best_t = -b - sqrt(disc); best = id
-		if best != "": select(best)
-```
+Selection: a left click casts a ray from the camera (`project_ray_origin`, `project_ray_normal`)
+against an invisible sphere of radius 0.75 at chest height (0.9 up) on each person, never against
+the caption text; the nearest hit is selected, the ring moves under them and the captions are laid
+out again.

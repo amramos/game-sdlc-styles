@@ -14,40 +14,34 @@ canvas `strokeText` (13/255 on that tile), edge resampling on the art (about 3/2
 frame's JPEG noise. **Forward+** renders the same frame (0.3 / 0.2 / 0.2 per 255 from the
 Compatibility render) with the same code.
 
-## The page as scenes
+The whole project that rendered the frame, including the scene that rebuilds the web demo exactly,
+is in this entry's `godot-port/` on the catalog site.
+
+## Putting it together
 
 Every picture is a generated image drawn by a node; every word, number, icon, balloon, slip and
-note is drawn live by a small component script; nothing is lettered into the art. One scene holds
-the page (positions in a 1280×720 page; panel children are relative to their panel):
+note is drawn live by a small component script; nothing is lettered into the art. One `Control`
+holds the page at the design size; children of a panel are placed relative to that panel:
 
 ```text
 Page (Control 1280×720)
 ├─ Paper (ColorRect, paper role)
-├─ Grain (TextureRect, the grain texture tiled, CanvasItemMaterial blend Multiply)
-├─ Exterior (ink_panel.gd, 840×520 at 16,16)
-│  ├─ Backdrop (backdrop.gd: bg-exterior, focus 0.5, 0.35)
-│  ├─ Sled, Walker, TowRope, FlareBearer, Dog (figure.gd / tow_rope.gd, standing on y = 468)
-│  ├─ Snow (snowfall.gd: 90 flakes, seed 9, t = 0.4)
-│  └─ Caption1, Caption2 (caption.gd, 300 wide)
-├─ RadioRoom (ink_panel.gd, 392×252 at 872,16)
-│  ├─ Backdrop (bg-radio-room, focus 0.3, 0.4)
-│  ├─ RadioSet (112 wide), Operator (190 tall) — the transmit lamp is the accent
-│  └─ Balloon (balloon.gd, 228 wide, tail to the operator's mouth)
-├─ DogClose (ink_panel.gd, 392×252 at 872,284)
-│  ├─ Backdrop (bg-slope, focus 0.5, 0.3), Dog (dog-close, panel height tall), Snow (40, seed 17)
-│  ├─ Caption (180 wide, 18 px)
-│  └─ SoundWord (sound_word.gd, right end at 380,182, −0.08 rad)
-├─ Question (title_label.gd at 22,556, 30 px)
-├─ Status (status_bar.gd at 590,552: wind 70 km/h, battery 40 %)
-├─ Answers (answer_row.gd)
-│  └─ Slip1..3 (answer_slip.gd, 262 wide at 18 + 282·i, 626; the first focused)
-└─ Note (pinned_note.gd at 884,572, rotation −0.044)
+├─ Grain (TextureRect: the grain tiled, CanvasItemMaterial blend Multiply)
+├─ Panel … (ink_panel.gd: clips its children, 5 px ink border drawn last)
+│  ├─ Backdrop (backdrop.gd: a background image cropped around a focus point)
+│  ├─ figures (figure.gd: cutouts standing on their bottom centre)
+│  ├─ weather (snowfall.gd: paper or ink dots)
+│  └─ captions (caption.gd), a balloon (balloon.gd), a sound word (sound_word.gd)
+├─ a question (title_label.gd), status marks (status_bar.gd)
+├─ answers (answer_row.gd → answer_slip.gd per answer)
+└─ a pinned note (pinned_note.gd)
 ```
 
-Cutouts (`figure.gd`) stand on their bottom centre and are sized by a height or a width, so a
-figure keeps its proportions whatever the art's pixel size; backdrops (`backdrop.gd`) crop like CSS
-`object-fit: cover` around a focus point. Snow is posed at `t = 0.4` as the frame is; set
-`animate = true` to let it fall (it redraws only that node, at the game's frame rate).
+Draw order is the tree order: paper, grain, then each panel's backdrop, figures, weather and
+lettering, then the panel border on top. A figure keeps its proportions whatever the art's pixel
+size (size it by a height or a width); backdrops crop like CSS `object-fit: cover`. Weather is
+posed at a time `t`; set `animate = true` to let it move (it redraws only that node). Keys or the
+arrows only flip `focus` on the slips; a slip re-places itself (lift, shadow, edge, underline).
 
 **Project settings:**
 
@@ -70,36 +64,33 @@ browser's `drawImage`, about twice the difference on every figure), so leave mip
 grain must repeat: every node that draws paper sets `texture_repeat = ENABLED` (the scripts do it in
 `_ready()`), and the page's `Grain` node sets it in the scene.
 
-**Fonts.** The demo uses system faces with fallbacks, and so does this port: `SystemFont` with the
-same lists (lettering: Comic Neue, Comic Sans MS, …, bold for captions and slips, regular for the
-note; titles: IM Fell English SC, Georgia, …, bold). For a shipped game, bundle the free faces
-(Comic Neue and IM Fell English SC, both OFL) as `FontFile`s instead of relying on what the
-player's system has, and keep `hinting = None`, greyscale antialiasing and quarter-pixel subpixel
-positioning. The title face's small capitals are its own OpenType `smcp` glyphs (`FontVariation`
-below), as CSS `small-caps` uses them; synthesised small caps are narrower and lighter.
+**Fonts.** The port uses `SystemFont`s with fallback lists (lettering: Comic Neue, Comic Sans MS, …,
+bold for captions and slips, regular for the note; titles: IM Fell English SC, Georgia, …, bold).
+For a shipped game, bundle the chosen free faces (both of these are OFL) as `FontFile`s, and keep
+`hinting = None`, greyscale antialiasing and quarter-pixel subpixel positioning. The title face's
+small capitals are its own OpenType `smcp` glyphs (`FontVariation` below); synthesised small caps
+are narrower and lighter.
 
 ## The paper grain and its multiply
 
-The demo multiplies a tileable greyscale grain (0.86–0.97) over every paper surface: the page,
-captions, slips and the note. In Godot:
+A tileable greyscale grain (0.86–0.97) is multiplied over every paper surface: the page, captions,
+slips and the note.
 
 - **The page**: a `TextureRect` of the grain, `stretch_mode = Tile`, with a `CanvasItemMaterial`
   whose `blend_mode = Multiply`, over a `ColorRect` in the paper role. The same node multiplies
   the grain over anything below it.
 - **Paper shapes** (`Ink.paper_poly()`): the shape is drawn as a polygon textured with the grain
-  and modulated by the paper colour, which is exactly paper × grain, the multiply over opaque paper
-  without a second node. The UVs carry the canvas rule that a pattern repeats from the origin of
-  the transform in force when it is filled: captions pass their global transform (the grain lines
-  up with the page's), while rotated slips and the note use their own local space (the grain turns
-  with the scrap of paper, as in the demo).
+  and modulated by the paper colour, which is exactly paper × grain without a second node. Captions
+  pass their global transform as the pattern (the grain lines up with the page's), while rotated
+  slips and the note use their own local space (the grain turns with the scrap of paper).
 
 No other blend mode is used: inks, fills and art are drawn normally.
 
 ## Shared drawing: `ink/ink.gd`
 
-Palette roles, the seeded random (mulberry32, matching the demo's snow and torn edges), Catmull-Rom
-curves, antialiased fills, brush strokes, canvas-style polyline strokes, paper, and lettering with
-canvas text metrics. Each component preloads it as `Ink`.
+Palette roles, a small seeded random (the port's copy of the demo's generator; any seeded generator
+does for a game), Catmull-Rom curves, antialiased fills, brush strokes, polyline strokes with miter
+joins, paper, and lettering placed by the em box top. Each component preloads it as `Ink`.
 
 ```gdscript
 extends RefCounted
@@ -461,23 +452,8 @@ func _draw() -> void:
 	draw_texture_rect(texture, Rect2(-d.x / 2, -d.y, d.x, d.y), false)
 ```
 
-```gdscript
-# ink/tow_rope.gd
-extends Node2D
-## The tow rope from the sled to the walker's hand: a brush stroke drawn by the page, not the art.
-const Ink = preload("res://ink/ink.gd")
-@export var sled: Node2D
-@export var walker: Node2D
-@export var ground_y := 0.0
-@export var width := 3.5
-
-func _draw() -> void:
-	var s: Rect2 = sled.rect(); var p: Rect2 = walker.rect()
-	Ink.brush(self, PackedVector2Array([
-		Vector2(s.end.x - 8, s.position.y + s.size.y * 0.45),
-		Vector2((s.end.x + p.position.x) / 2 + 10, ground_y - 40),
-		Vector2(p.position.x + p.size.x * 0.12, p.position.y + p.size.y * 0.48)]), width, Ink.c("ink"))
-```
+A line between two figures (a rope, a lead, a cable) is `Ink.brush()` through three points taken
+from their `rect()`s.
 
 ```gdscript
 # ink/snowfall.gd
@@ -598,7 +574,7 @@ extends Node2D
 ## A sound word: big small-caps serif letters, ink copy offset 6 px, an 8 px ink stroke under a paper
 ## fill. The node's position is the right end of the word's top line; it rotates by `angle`.
 const Ink = preload("res://ink/ink.gd")
-@export var text := "RUFF!"
+@export var text := ""          # your sound word
 @export var font_size := 44
 @export var angle := -0.08
 @export var outline := 8
@@ -822,28 +798,25 @@ func _draw() -> void:
 	Ink.disc(self, Vector2(w - 22, 10), 6, ink)
 ```
 
-Setting a slip's `focus` re-places it (lift, shadow, edge, underline), so keys 1–3 or the arrows
-only flip `focus` on the three slips.
-
 ## What Godot needed (measured in 4.7.1)
 
 1. **Compatibility ignores 2D MSAA.** `msaa_2d` smooths polygons in Forward+ but leaves every
-   `draw_colored_polygon()` edge stair-stepped in Compatibility, which made each brush stroke, slip
-   edge and icon visibly jagged against the canvas. `Ink.fill()` and `Ink.band()` antialias by
-   hand: the shape shrunk by half a pixel, ringed by a one-pixel feather from the colour to
-   transparent. Stroke segments feather only their long sides, or the joints show faint beads.
-   Dabs use the same fill rather than `draw_circle(..., antialiased = true)`, so a dab and the
-   segments beside it get the same edge.
+   `draw_colored_polygon()` edge stair-stepped in Compatibility, so each brush stroke, slip edge and
+   icon came out jagged. `Ink.fill()` and `Ink.band()` antialias by hand: the shape shrunk by half a
+   pixel, ringed by a one-pixel feather from the colour to transparent. Stroke segments feather
+   only their long sides, or the joints show faint beads. Dabs use the same fill rather than
+   `draw_circle(..., antialiased = true)`, so a dab and the segments beside it get the same edge.
 2. **`Font.get_string_size()` rounds the width up to a whole pixel** (so does `TextLine`), while
-   the glyphs are drawn at fractional advances. Chained layouts drift: the battery sat 1.3 px right
-   of the web frame. `Ink.text_w()` sums the shaped glyph advances from the `TextServer`.
-3. **Canvas `textBaseline = 'top'`** is the em box top: the ascent normalised to one em
-   (`fs × ascent / (ascent + descent)`). That matches the browser for the lettering face; the serif
-   title face sat 1 px low and takes a −1 px nudge.
+   the glyphs are drawn at fractional advances, so layouts that chain measured widths drift (a
+   value, its unit, the next icon). `Ink.text_w()` sums the shaped glyph advances from the
+   `TextServer`.
+3. **Text placed by its em box top** (canvas `textBaseline = 'top'`) is the ascent normalised to one
+   em: `fs × ascent / (ascent + descent)`. The serif title face sat 1 px low against the browser
+   and takes a −1 px nudge.
 4. **`draw_string_outline()`'s `size`** grows each glyph edge by size/4 px, while a canvas stroke of
-   `lineWidth` grows it by lineWidth/2: the 8 px sound-word stroke is `outline_size = 16`.
+   `lineWidth` grows it by lineWidth/2: an 8 px sound-word stroke is `outline_size = 16`.
 5. **Inset or degenerate polygons fail triangulation** ("Invalid polygon data") and draw nothing:
    the tapered ends of a brush stroke and the fibres of a torn edge. `Ink.fill()` falls back to the
    true shape when the shrunk one won't triangulate and skips feather quads that fold over.
-6. The demo's canvas clip per panel is `Control.clip_contents`; it clips every child, `Node2D`
-   figures included. The panel border is an internal child added last, so it draws over the art.
+6. **Clipping a panel** is `Control.clip_contents`; it clips every child, `Node2D` figures
+   included. The panel border is an internal child added last, so it draws over the art.

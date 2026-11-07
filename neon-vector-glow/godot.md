@@ -17,6 +17,10 @@ draws the same frame (mean 0.1/255 against the Compatibility render). What still
 
 <!-- matched-web-frame: 3f31948ee485 -->
 
+The whole project that rendered the frame, including the script that rebuilds the web demo exactly
+(its seeded random, shapes, positions and HUD values), is in this entry's `godot-port/` on the
+catalog site.
+
 ## How the bloom is made
 
 Godot's engine glow does not reproduce this look. An earlier test with one level and an overall gain
@@ -259,9 +263,32 @@ void fragment() {
 }
 ```
 
-## Building a frame
+## Putting it together
 
-Draw order, as the demo's `drawWorld()` and `drawHud()`. Each step is a node added in this order:
+The scene root is a `Node2D` whose children are the passes, added in draw order. Each pass is a
+`GlowPass` node holding its own SubViewports and the `TextureRect`s that composite them:
+
+```text
+Main (Node2D; clear colour = void)
+├─ ground  GlowPass([])                 void fill and the grid, never in the bloom
+├─ world   GlowPass(BLOOM.world)        sparks, then every glowing shape, the player last
+├─ rims    GlowPass([])                 void discs cut around each threat, over the world bloom
+├─ danger  GlowPass(BLOOM.danger)       threats in their own tighter pass
+├─ fade    Painter                      edge fade behind the HUD (not a box)
+└─ hud     GlowPass(BLOOM.hud, true)    numbers, labels and icons; blurs its own line layer
+```
+
+`BLOOM` holds the table above:
+
+```gdscript
+const BLOOM := {   # r: blur radius in 720p px; g: gain; s: working resolution
+	"world":  [{"r": 2.0, "g": 1.2, "s": 1.0}, {"r": 7.0, "g": 1.8, "s": 0.5}, {"r": 24.0, "g": 3.2, "s": 0.25}],
+	"danger": [{"r": 2.0, "g": 1.0, "s": 1.0}, {"r": 6.0, "g": 1.2, "s": 0.5}],
+	"hud":    [{"r": 1.5, "g": 0.55, "s": 1.0}, {"r": 5.0, "g": 0.45, "s": 0.5}],
+}
+```
+
+Each step below is a node added in this order (the shapes and HUD values are an example's):
 
 ```gdscript
 func glow_pass(spec: Array, blur_lines := false) -> GlowPass:
@@ -306,8 +333,7 @@ for i in lives:   # the player's shape pointing up, a plain 2 px line
 	hud.plain(shape("player", 9), col("player"), 2, Transform2D(-PI / 2, Vector2(38 + i * 26, 84)))
 ```
 
-`BLOOM` holds the table above as `{"r", "g", "s"}` dictionaries. Paths are arrays of
-`{pts: PackedVector2Array, closed: bool}`, one per subpath of the demo's `Path2D`. Arcs and rings
+Paths are arrays of `{pts: PackedVector2Array, closed: bool}`, one per subpath. Arcs and rings
 become polylines with chords of about 3 px, and a full ring is a closed `Line2D` (no repeated end
 point). Dashes become one open arc per dash:
 

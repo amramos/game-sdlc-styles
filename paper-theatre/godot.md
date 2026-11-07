@@ -6,15 +6,16 @@
 `demo.html?frame=key-scene`: the same printed pieces (this entry's own images), camera, lighting
 plot, card edges, shadows, flown placard, markers and pinned slip. Measured against
 `frames/key-scene.jpg`: mean difference 3.1 / 3.0 / 2.9 per 255 (RGB) for the delivered JPEG,
-4.3 / 3.6 / 4.0 for the lossless capture, and 1.5% of pixels differ by more than 24. What is left
-is texture detail (Godot's anisotropic filtering keeps the hatching slightly crisper than WebGL's,
-and the web frame's JPEG smears colour), glyph rasterisation on the slip and placard, and dark
-tones that land one or two levels low in Compatibility (trap 6). Forward+ renders the same code to
-within 2/255 of Compatibility.
+4.3 / 3.6 / 4.0 for the lossless capture, and 1.5% of pixels differ by more than 24. The whole
+project that rendered the frame, including the code that rebuilds the web demo exactly, is in this
+entry's `godot-port/` on the catalog site.
 
-One place where the web frame is off: below the frame at the far left and right edges (around
-y 560), the floor box's front face z-fights with the house wall in three.js, a 60 × 12 px band of
-stripes. The port sets that face 0.001 behind the wall, so only the stage lip shows it.
+What still differs: texture detail (Godot's anisotropic filtering keeps the hatching slightly
+crisper than WebGL's, and the web frame's JPEG smears colour), glyph rasterisation on the slip and
+placard, and dark tones that land one or two levels low in Compatibility (trap 6). Forward+ renders
+the same code to within 2/255 of Compatibility. The web frame itself has one flaw: at the far left
+and right below the stage, the floor's front face z-fights with the house wall in three.js; the
+port sets that face 0.001 behind the wall.
 
 ## How the look is built
 
@@ -22,51 +23,47 @@ stripes. The port sets that face 0.001 behind the wall, so only the stage lip sh
   at the sides), the floor (the plank print mirrored both ways), three ground rows (each strip
   repeated so it keeps its height), two pairs of wings, the cast and props, the drapes, the
   valance and the proscenium, scaled so its keyed opening is 7.8 wide. Sizes, depths and turns
-  are the recipe's; `main.gd` below lays out the example key scene.
+  are the recipe's.
 - **The paper edge.** Each cut-out is two planes: the print, alpha-tested at 0.5, and 0.018
   behind it a card-coloured plane that keeps only the print's alpha, offset 0.022 down and away
   from the key light and grown 0.015 a side. Both cast shadows; the drapes and valance don't.
-- **The light.** No Godot lights at all. One unshaded shader (`paper.gdshader`) computes the plot
-  the way three.js's `MeshStandardMaterial` does: Lambert plus GGX specular for each spot
-  (smoothstep cone, no distance falloff) and a hemisphere fill (sky `light-fill`, ground
-  `boards`), from linear uniforms. It reads two shadow maps the stage renders itself: for the key
-  and the footlights, a 2048² `SubViewport` with a square perspective camera at the light (fov
-  twice the cone, near 3, far 45) draws the casters, which sit on render layer 2, with
-  `depth.gdshader`; the paper shader samples them with three.js's 9-tap PCF-soft filter, bias
+- **The light.** No Godot lights at all. One unshaded shader (`paper.gdshader`) computes the plot:
+  Lambert plus GGX specular for each spot (smoothstep cone, no distance falloff) and a hemisphere
+  fill (sky `light-fill`, ground `boards`), from linear uniforms. It reads two shadow maps the stage
+  renders itself: for the key and the footlights, a 2048² `SubViewport` with a square perspective
+  camera at the light (fov twice the cone, near 3, far 45) draws the casters, which sit on render
+  layer 2, with `depth.gdshader`; the paper shader samples them with a 9-tap PCF-soft filter, bias
   −0.0006, normal bias 0.02. This is what keeps Compatibility right (traps 1 and 2). It costs two
   depth renders a frame; in a game, update them only when something on stage moves.
 - **The prints are linearised once at start-up.** Each texture is drawn into an HDR 2D
   `SubViewport` through `linearize.gdshader`, read back as half floats and mipmapped on the CPU,
-  so the mips average in linear light as WebGL's do for sRGB textures. With the importer's
-  mipmaps (averaged in sRGB) the finely hatched prints come out up to 10 levels darker at stage
-  distance.
+  so the mips average in linear light. With the importer's mipmaps (averaged in sRGB) the finely
+  hatched prints come out up to 10 levels darker at stage distance.
 - **Post and interface.** A full-screen `ColorRect` on a `CanvasLayer` pulls the edges toward
-  `house` in linear light (`vignette.gdshader`). The slip is a `Control` on the layer above: torn
-  paper (mulberry32, seed 5, the page's clip-path), the hard card drop, an erf box shadow for the
-  CSS blur, the tack, glyphs rasterised from the page's own SVG symbols with
-  `Image.load_svg_from_string()`, live text and printed pips, laid out with the page's CSS box
-  model. The placard is painted once into a 640×180 `SubViewport` (seed 9), linearised, and used
-  as the placard quad's texture with emission 0.35. Slips are placed from the camera with
-  `Camera3D.unproject_position()`.
-- **Fonts.** The page asks for Iowan Old Style, then Palatino Linotype; the port uses a
+  `house` in linear light (`vignette.gdshader`). Slips are `Control`s on the layer above: a torn
+  paper edge, the hard card drop, a soft erf box shadow, a tack, then live text and icons. Slips
+  are placed from the camera with `Camera3D.unproject_position()`. The flown placard is painted
+  once into a 640×180 `SubViewport`, linearised, and used as its quad's texture with emission 0.35.
+- **Fonts.** The demo asks for Iowan Old Style, then Palatino Linotype; the port uses a
   `SystemFont` with the same list. To ship, bundle a licensed copy or use TeX Gyre Pagella (free,
   the same design). Small caps and old-style figures are the font's `smcp` and `onum` features via
-  `FontVariation.opentype_features`. Chrome lays out lines with the font's OS/2 win metrics, not
-  the hhea ascent Godot reports, so `slip.gd` places baselines from the win values.
+  `FontVariation.opentype_features`. (The port also places baselines from the font's OS/2 win
+  metrics, as Chrome does; Godot's own ascent sets lines about 3 px higher, which only matters when
+  matching the web.)
 
 ## Project and import settings
 
-- Renderer `gl_compatibility`, viewport 1280×720, `anti_aliasing/quality/msaa_3d = 2` (4×, like
-  the page's multisampled target), `textures/default_filters/anisotropic_filtering_level = 3` (8×).
+- Renderer `gl_compatibility`, viewport 1280×720, `anti_aliasing/quality/msaa_3d = 2` (4×),
+  `textures/default_filters/anisotropic_filtering_level = 3` (8×).
 - Every image: Lossless, `process/fix_alpha_border = false` (keeps the cream the keyed pixels
-  carry, so alpha-tested edges filter as in the page), premultiply off, no VRAM compression. The
+  carry, so alpha-tested edges filter cleanly), premultiply off, no VRAM compression. The
   importer's mipmaps are not used: `linearize()` rebuilds them.
 - Environment: background `house`, ambient black, reflections off, linear tonemap.
 
-## Compatibility traps found here
+## Compatibility traps
 
-In addition to the earlier ports' list (ambient with a shadowed light, sky and vertex-colour
-spaces, writing ALPHA):
+Also from earlier ports: no Environment ambient with a shadowed light, mind which space sky and
+vertex colours are in, and writing `ALPHA` moves the material to the transparent pass.
 
 1. **The base pass works in sRGB, untouched.** A `source_color` texture arrives in `fragment()`
    undecoded, and `ALBEDO` (unshaded) or `EMISSION` reaches the screen unencoded: an emission of
@@ -88,12 +85,10 @@ spaces, writing ALPHA):
    through exactly, which is why the shadow maps store depth as three 6-bit digits in codes
    176–239.
 7. **`draw_colored_polygon()` fails on an outline that crosses itself**, which a jittered torn
-   edge does at its corners; a canvas fill doesn't mind. Union it with an inner rectangle first.
+   edge does at its corners; a canvas fill doesn't mind. Union it with an inner rectangle first
+   (`_solid()` below).
 
-## The code
-
-`main.tscn` is one `Node3D` with `main.gd`; the images sit in `res://img/` under the page's names.
-The slip's lines, the placard's title and the stand positions are the example key scene's.
+## Shaders
 
 `stage.gdshaderinc`
 
@@ -368,6 +363,28 @@ void fragment() {
 }
 ```
 
+## Putting it together
+
+`main.tscn` is one `Node3D` with `main.gd`; the prints sit in `res://img/`. At start-up `_ready()`
+linearises the prints, builds the two shadow rigs, then the stage box back to front, the
+environment, the camera, the vignette layer (`CanvasLayer` 1) and the interface (`CanvasLayer` 2):
+
+```text
+Main (Node3D, main.gd)
+├── SubViewport × 2           shadow maps (key, foot): Camera3D drawing render layer 2 only
+├── stage pieces              MeshInstance3D quads with paper.gdshader (layer 1),
+│                             and their casters with depth.gdshader (layer 2)
+├── WorldEnvironment          background house, ambient black, linear tonemap
+├── Camera3D                  cull mask 1
+├── CanvasLayer 1             ColorRect with vignette.gdshader
+└── CanvasLayer 2             slips (slip.gd), placed with unproject_position()
+```
+
+Every material that shows a print comes from `paper_mat()`, which hands it the lighting plot and
+both shadow maps. A cut-out is `stand(texture key, {h, x, z, yaw, …})`; it adds its card edge and
+casters itself. Pieces are held by `slide()` (floor) or `wire()` (fly); `marker()` is the accent.
+The example's wings, cast and markers are left out of the `_ready()` below.
+
 `main.gd`
 
 ```gdscript
@@ -395,7 +412,7 @@ var TOP := FLOOR + OPEN_H
 const FILES := {
 	"backcloth": "backcloth.jpg", "floor": "floor.jpg", "proscenium": "proscenium.png", "valance": "valance.png",
 	"drape": "drape.png", "rowFar": "row-far.png", "rowMid": "row-mid.png", "rowNear": "row-near.png",
-	"birch": "wing-birch.png", "oak": "wing-oak.png", "girl": "girl.png", "wolf": "wolf.png", "cart": "cart.png",
+	# … then the prints of the game's wings, cast and props
 }
 var TEX := {}
 var paper_shader := preload("res://paper.gdshader")
@@ -607,18 +624,8 @@ func _ready() -> void:
 		var n := maxi(1, roundi(20.0 / (r[1] * a)))
 		stand(r[0], {"w": 20.0, "h": 20.0 / n / a, "x": 0.0, "z": r[2], "repeat": float(n)})
 
-	# wings: two pairs of tree flats, turned toward the centre
-	stand("birch", {"h": 5.6, "x": -4.5, "z": 2.5, "yaw": 0.22})
-	stand("oak", {"h": 5.6, "x": 4.6, "z": 2.5, "yaw": -0.22, "flip": true})
-	stand("oak", {"h": 5.0, "x": -5.0, "z": -1.5, "yaw": 0.2})
-	stand("birch", {"h": 5.2, "x": 5.0, "z": -1.5, "yaw": -0.2, "flip": true})
-
-	# the cast, posed at t = 0.4 s
-	stand("girl", {"h": 2.05, "x": -1.2, "z": 0.5, "yaw": 0.12, "y": FLOOR + absf(sin(T * 1.3)) * 0.015})
-	stand("wolf", {"h": 1.55, "x": 1.9, "z": 0.2, "yaw": -0.15, "roll": sin(T * 0.9) * 0.008})
-	stand("cart", {"h": 1.75, "x": -3.0, "z": -1.3, "yaw": 0.2})
-	slide(-8, -1.2, 0.48)
-	slide(1.9, 8, 0.18)
+	# wings, cast and props: stand(<texture key>, {"h": …, "x": …, "z": …, "yaw": …}),
+	# held by slide() along the floor or wire() from the fly
 
 	# proscenium: the generated frame, scaled so its keyed opening matches the 7.8-wide stage opening
 	var sx := 7.8 / (OPENING.x1 - OPENING.x0)
@@ -651,9 +658,7 @@ func _ready() -> void:
 	wire(1.0, TOP - 0.89, TOP + 1, 3.6)
 	paint_placard(placard_mat)
 
-	# accent markers over what the player can act on
-	marker(1.9, 0.3, 0.2)
-	marker(-3.0, 0.45, -1.3)
+	# accent markers over what the player can act on: marker(x, y, z)
 
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
@@ -680,7 +685,7 @@ func _ready() -> void:
 	vm.set_shader_parameter("house_linear", lin3(house)); vm.set_shader_parameter("amount", LIGHT.vignette)
 	vr.material = vm; vl.add_child(vr)
 
-	# interface: the basket slip pinned over the left pillar
+	# interface: a slip pinned over the left pillar
 	var hud := CanvasLayer.new(); hud.layer = 2; add_child(hud)
 	var slip := Slip.new()
 	slip.regular = pala(400, false)
@@ -754,14 +759,14 @@ func linearize(src: Dictionary) -> Dictionary:
 	return out
 ```
 
-`slip.gd`
+`slip.gd`, the slip's frame. The example's lines, meters and icons are left out; the port draws its
+icons from SVG with `Image.load_svg_from_string()` at 22 px and printed pips with `draw_rect()` and
+`draw_circle()`:
 
 ```gdscript
 extends Control
-## A paper slip pinned to the frame: torn edge, dark card edge as a hard drop, a soft shadow,
-## a tack, then its lines. This one is the basket (an inventory and two meters of printed pips).
-## Layout follows the demo's CSS box model at 720p: 172 wide, padding 9/12/11, 16 px text at
-## line-height 1.3, 22 px glyphs, rows 26 tall.
+## A paper slip pinned to the frame: torn edge, dark card edge as a hard drop, a soft shadow and a
+## tack; the game draws its own lines and icons in _draw().
 
 const Rng := preload("res://mulberry32.gd")
 const W := 172.0
@@ -774,32 +779,11 @@ var tear_seed := 5
 var regular: Font
 var bold_onum: Font      # counts: bold, old-style figures
 var bold_smcp: Font      # heading: bold small caps
-var icons := {}          # name -> Texture2D, rasterised from the same SVG symbols as the page
-
-const ITEMS := [["loaf", "Rye loaf", "2"], ["honey", "Honey", "1"], ["specs", "Spectacles", "1"],
-	["oil", "Lamp oil", "½"], ["wool", "Grey wool", "1"]]
-const HEART := 7    # of 10
-const SUN := 3      # of 5
-
-const SVG := {
-	"loaf": '<path d="M3 15c0-6 4-9 9-9s9 3 9 9v3H3z" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M8 9l-1 5M12 8v6M16 9l1 5" stroke="currentColor" stroke-width="1.4" fill="none"/>',
-	"honey": '<path d="M6 9h12l-1 11H7z" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M5 5h14v4H5z" fill="#C8574A" stroke="currentColor" stroke-width="1.6"/>',
-	"specs": '<circle cx="7" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 14h2M3 13l-1-4M21 13l1-4" stroke="currentColor" stroke-width="1.6" fill="none"/>',
-	"oil": '<path d="M9 3h6v4l3 3v11H6V10l3-3z" fill="#A9B2B8" stroke="currentColor" stroke-width="1.6"/><path d="M6 15h12v6H6z" fill="#B08355" stroke="currentColor" stroke-width="1.6"/>',
-	"wool": '<circle cx="12" cy="12" r="8" fill="#9A968F" stroke="currentColor" stroke-width="1.6"/><path d="M6 8c4 2 8 6 9 11M9 5c3 3 8 5 10 10M5 14c3 0 6 3 7 6" stroke="currentColor" stroke-width="1.2" fill="none"/>',
-	"heart": '<path d="M12 21C5 15 2 12 2 8a5 5 0 0 1 10-1 5 5 0 0 1 10 1c0 4-3 7-10 13z" fill="#C8574A" stroke="currentColor" stroke-width="1.6"/>',
-	"sun": '<circle cx="12" cy="12" r="5" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4M4 4l3 3M17 17l3 3M20 4l-3 3M7 17l-3 3" stroke="currentColor" stroke-width="1.6"/>',
-}
 
 var outline := PackedVector2Array()
 
 func _ready() -> void:
 	size = Vector2(W, H)
-	for k in SVG:
-		var src: String = '<svg width="24" height="24" viewBox="0 0 24 24">%s</svg>' % SVG[k].replace("currentColor", "#" + ink.to_html(false))
-		var img := Image.new()
-		img.load_svg_from_string(src, 22.0 / 24.0)
-		icons[k] = ImageTexture.create_from_image(img)
 	# the torn edge: the CSS clip-path polygon, jitter 0..2.4 px rounded to 0.1, every 12 px
 	var r := Rng.new(tear_seed)
 	var j := func() -> float: return snappedf(r.next() * 2.4, 0.1)
@@ -822,15 +806,6 @@ func _ready() -> void:
 	add_child(sh)
 	queue_redraw()
 
-## CSS line box: half-leading above the ascent. Chrome on Windows takes ascent and descent from
-## the font's OS/2 win metrics (Palatino Linotype: 2150 and 613 per 2048 em); Godot's own
-## get_ascent() uses the smaller hhea values and would set every line about 3 px high.
-const WIN_ASCENT := 2150.0 / 2048.0
-const WIN_DESCENT := 613.0 / 2048.0
-func _baseline(_f: Font, px: int, top: float, line_h: float) -> float:
-	var a := WIN_ASCENT * px; var d := WIN_DESCENT * px
-	return top + (line_h - (a + d)) * 0.5 + a
-
 func _draw() -> void:
 	var tack := Vector2(86, 4)
 	# hard card-coloured drop of the whole pinned slip, tack included
@@ -841,27 +816,7 @@ func _draw() -> void:
 		draw_colored_polygon(poly, paper)
 		poly.append(poly[0])
 		draw_polyline(poly, paper, 1.0, true)
-	# heading
-	draw_string(bold_smcp, Vector2(12, _baseline(bold_smcp, 20, 9, 22)), "Basket", HORIZONTAL_ALIGNMENT_CENTER, 148, 20, ink)
-	# inventory rows
-	for i in ITEMS.size():
-		var top := 37.0 + 26.0 * i + 2.0
-		draw_texture(icons[ITEMS[i][0]], Vector2(12, top))
-		draw_string(regular, Vector2(42, _baseline(regular, 16, top + 0.6, 20.8)), ITEMS[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ink)
-		draw_string(bold_onum, Vector2(12, _baseline(bold_onum, 16, top + 0.6, 20.8)), ITEMS[i][2], HORIZONTAL_ALIGNMENT_RIGHT, 148, 16, ink)
-	# rule
-	draw_rect(Rect2(12, 174, 148, 1), ink)
-	# meters: courage as bars, daylight as suns
-	draw_texture(icons["heart"], Vector2(12, 182))
-	for i in 10:
-		var rc := Rect2(41 + 12 * i, 185, 9, 16)
-		draw_rect(rc, ink)
-		if i >= HEART: draw_rect(rc.grow(-1), paper)
-	draw_texture(icons["sun"], Vector2(12, 208))
-	for i in 5:
-		var c := Vector2(41 + 18 * i + 7.5, 208 + 11)
-		draw_circle(c, 7.5, ink, true, -1.0, true)
-		draw_circle(c, 6.5, Color("#DDBE68") if i < SUN else paper, true, -1.0, true)
+	# the slip's lines: draw_string() with regular / bold_onum / bold_smcp, draw_texture() for icons
 	# tack
 	draw_circle(tack, 8.0, ink, true, -1.0, true)
 	draw_circle(tack, 6.0, card, true, -1.0, true)
@@ -892,7 +847,7 @@ extends Node2D
 ## double ruled frame and the scene's name in italic bold. The image becomes the placard's texture.
 
 const Rng := preload("res://mulberry32.gd")
-var title := "The Birch Wood"
+var title := "Scene title"   # the scene's name
 var paper := Color("#F3EAD2")
 var card := Color("#5A3E2B")
 var ink := Color("#2B2118")
@@ -935,23 +890,14 @@ func _solid(p: PackedVector2Array) -> Array:
 	return out
 ```
 
-`mulberry32.gd`
+`slip.gd` and `placard.gd` preload `res://mulberry32.gd` for the torn edges. The port's copy is
+bit-exact with the demo's generator, so the same seed tears the same edges as on the web; a game
+only needs a seeded `next()` in [0, 1), for example:
 
 ```gdscript
 extends RefCounted
-## mulberry32, bit for bit as the web demo's: the same seed tears the same paper edges.
-
-var _a := 0
-
-func _init(seed: int) -> void:
-	_a = seed & 0xFFFFFFFF
-
-static func _imul(x: int, y: int) -> int:
-	return ((x & 0xFFFF) * y + ((((x >> 16) * y) & 0xFFFF) << 16)) & 0xFFFFFFFF
-
-func next() -> float:
-	_a = (_a + 0x6D2B79F5) & 0xFFFFFFFF
-	var t := _imul(_a ^ (_a >> 15), 1 | _a)
-	t = ((t + _imul(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t
-	return float((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+## A seeded generator for the torn edges: next() returns a float in [0, 1).
+var _r := RandomNumberGenerator.new()
+func _init(seed: int) -> void: _r.seed = seed
+func next() -> float: return _r.randf()
 ```

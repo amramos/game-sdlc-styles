@@ -4,8 +4,10 @@ The hosted art-style catalog of [game-ai-sdlc](https://github.com/amramos/game-a
 **https://amramos.github.io/game-sdlc-styles/**.
 
 Each folder is one look: its rules (`style.md`), recipe, camera framings, web and Godot code, an
-example palette, reference frames, a Godot render matched against the web frame, and a `demo.html`
-that runs the look in the browser with its example art in `assets/`.
+example palette, reference frames, a Godot render matched against the web frame, a `demo.html`
+that runs the look in the browser with its example art in `assets/`, and `godot-port/`, the Godot
+project that rendered the Godot frame. `godot.md` is the part of that project a game needs; the
+project also holds the code that rebuilds the web demo exactly, to re-render the match after a change.
 
 The SDLC plugin ships only what agents read (the index, each entry's text and a 640 px preview), so
 installing it stays light. After changing an entry here:

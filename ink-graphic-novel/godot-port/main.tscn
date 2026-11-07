@@ -1,0 +1,254 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ink/ink_panel.gd" id="panel"]
+[ext_resource type="Script" path="res://ink/backdrop.gd" id="backdrop"]
+[ext_resource type="Script" path="res://ink/figure.gd" id="figure"]
+[ext_resource type="Script" path="res://ink/tow_rope.gd" id="rope"]
+[ext_resource type="Script" path="res://ink/snowfall.gd" id="snow"]
+[ext_resource type="Script" path="res://ink/caption.gd" id="caption"]
+[ext_resource type="Script" path="res://ink/balloon.gd" id="balloon"]
+[ext_resource type="Script" path="res://ink/sound_word.gd" id="sfx"]
+[ext_resource type="Script" path="res://ink/title_label.gd" id="label"]
+[ext_resource type="Script" path="res://ink/status_bar.gd" id="status"]
+[ext_resource type="Script" path="res://ink/answer_row.gd" id="row"]
+[ext_resource type="Script" path="res://ink/answer_slip.gd" id="slip"]
+[ext_resource type="Script" path="res://ink/pinned_note.gd" id="note"]
+[ext_resource type="Texture2D" path="res://art/paper-grain.png" id="grain"]
+[ext_resource type="Texture2D" path="res://art/bg-exterior.png" id="bg_ext"]
+[ext_resource type="Texture2D" path="res://art/bg-radio-room.png" id="bg_radio"]
+[ext_resource type="Texture2D" path="res://art/bg-slope.png" id="bg_slope"]
+[ext_resource type="Texture2D" path="res://art/sled.png" id="sled"]
+[ext_resource type="Texture2D" path="res://art/rescuer-pull.png" id="pull"]
+[ext_resource type="Texture2D" path="res://art/rescuer-flare.png" id="flare"]
+[ext_resource type="Texture2D" path="res://art/dog.png" id="dog"]
+[ext_resource type="Texture2D" path="res://art/radio-set.png" id="radio"]
+[ext_resource type="Texture2D" path="res://art/operator.png" id="operator"]
+[ext_resource type="Texture2D" path="res://art/dog-close.png" id="dogclose"]
+
+[sub_resource type="CanvasItemMaterial" id="multiply"]
+blend_mode = 3
+
+[node name="Page" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+
+[node name="Paper" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0.92549, 0.894118, 0.807843, 1)
+
+[node name="Grain" type="TextureRect" parent="."]
+material = SubResource("multiply")
+texture_repeat = 2
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+texture = ExtResource("grain")
+expand_mode = 1
+stretch_mode = 1
+
+[node name="Exterior" type="Control" parent="."]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 856.0
+offset_bottom = 536.0
+mouse_filter = 2
+script = ExtResource("panel")
+
+[node name="Backdrop" type="Control" parent="Exterior"]
+layout_mode = 0
+offset_right = 840.0
+offset_bottom = 520.0
+mouse_filter = 2
+script = ExtResource("backdrop")
+texture = ExtResource("bg_ext")
+focus = Vector2(0.5, 0.35)
+
+[node name="Sled" type="Node2D" parent="Exterior"]
+position = Vector2(160, 474)
+script = ExtResource("figure")
+texture = ExtResource("sled")
+width = 230.0
+
+[node name="Walker" type="Node2D" parent="Exterior"]
+position = Vector2(300, 468)
+script = ExtResource("figure")
+texture = ExtResource("pull")
+height = 196.0
+
+[node name="TowRope" type="Node2D" parent="Exterior" node_paths=PackedStringArray("sled", "walker")]
+script = ExtResource("rope")
+sled = NodePath("../Sled")
+walker = NodePath("../Walker")
+ground_y = 468.0
+
+[node name="FlareBearer" type="Node2D" parent="Exterior"]
+position = Vector2(430, 470)
+script = ExtResource("figure")
+texture = ExtResource("flare")
+height = 236.0
+
+[node name="Dog" type="Node2D" parent="Exterior"]
+position = Vector2(560, 474)
+script = ExtResource("figure")
+texture = ExtResource("dog")
+width = 132.0
+
+[node name="Snow" type="Node2D" parent="Exterior"]
+script = ExtResource("snow")
+
+[node name="Caption1" type="Control" parent="Exterior"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+script = ExtResource("caption")
+text = "02:40. The pass closed an hour ago."
+
+[node name="Caption2" type="Control" parent="Exterior"]
+layout_mode = 0
+offset_left = 520.0
+offset_top = 20.0
+script = ExtResource("caption")
+text = "Two climbers are still on the north face."
+
+[node name="RadioRoom" type="Control" parent="."]
+layout_mode = 0
+offset_left = 872.0
+offset_top = 16.0
+offset_right = 1264.0
+offset_bottom = 268.0
+mouse_filter = 2
+script = ExtResource("panel")
+
+[node name="Backdrop" type="Control" parent="RadioRoom"]
+layout_mode = 0
+offset_right = 392.0
+offset_bottom = 252.0
+mouse_filter = 2
+script = ExtResource("backdrop")
+texture = ExtResource("bg_radio")
+focus = Vector2(0.3, 0.4)
+
+[node name="RadioSet" type="Node2D" parent="RadioRoom"]
+position = Vector2(297.92, 201.6)
+script = ExtResource("figure")
+texture = ExtResource("radio")
+width = 112.0
+
+[node name="Operator" type="Node2D" parent="RadioRoom"]
+position = Vector2(105.84, 256)
+script = ExtResource("figure")
+texture = ExtResource("operator")
+height = 190.0
+
+[node name="Balloon" type="Control" parent="RadioRoom"]
+layout_mode = 0
+offset_left = 156.0
+offset_top = 8.0
+script = ExtResource("balloon")
+text = "Station to Team Two. Do you read? Over."
+tail = Vector2(156.8, 105.84)
+
+[node name="DogClose" type="Control" parent="."]
+layout_mode = 0
+offset_left = 872.0
+offset_top = 284.0
+offset_right = 1264.0
+offset_bottom = 536.0
+mouse_filter = 2
+script = ExtResource("panel")
+
+[node name="Backdrop" type="Control" parent="DogClose"]
+layout_mode = 0
+offset_right = 392.0
+offset_bottom = 252.0
+mouse_filter = 2
+script = ExtResource("backdrop")
+texture = ExtResource("bg_slope")
+focus = Vector2(0.5, 0.3)
+
+[node name="Dog" type="Node2D" parent="DogClose"]
+position = Vector2(164.64, 258)
+script = ExtResource("figure")
+texture = ExtResource("dogclose")
+height = 252.0
+
+[node name="Snow" type="Node2D" parent="DogClose"]
+script = ExtResource("snow")
+area = Vector2(392, 252)
+count = 40
+seed = 17
+
+[node name="Caption" type="Control" parent="DogClose"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 12.0
+script = ExtResource("caption")
+text = "The dog has the scent."
+box_width = 180.0
+font_size = 18
+
+[node name="SoundWord" type="Node2D" parent="DogClose"]
+position = Vector2(380, 182)
+script = ExtResource("sfx")
+
+[node name="Question" type="Control" parent="."]
+layout_mode = 0
+offset_left = 22.0
+offset_top = 556.0
+offset_right = 560.0
+offset_bottom = 596.0
+mouse_filter = 2
+script = ExtResource("label")
+text = "What does the station do?"
+
+[node name="Status" type="Control" parent="."]
+layout_mode = 0
+offset_left = 590.0
+offset_top = 552.0
+offset_right = 870.0
+offset_bottom = 592.0
+mouse_filter = 2
+script = ExtResource("status")
+stats = Array[Dictionary]([{"icon": "wind", "value": "70", "unit": "km/h"}, {"icon": "battery", "value": "40", "unit": "%", "charge": 0.4}])
+
+[node name="Answers" type="Node2D" parent="."]
+script = ExtResource("row")
+
+[node name="Slip1" type="Node2D" parent="Answers"]
+position = Vector2(18, 626)
+script = ExtResource("slip")
+text = "Send the dog ahead"
+key = "1"
+focus = true
+angle = -0.03
+seed = 11
+
+[node name="Slip2" type="Node2D" parent="Answers"]
+position = Vector2(300, 626)
+script = ExtResource("slip")
+text = "Hold at the hut"
+key = "2"
+angle = 0.022
+seed = 12
+
+[node name="Slip3" type="Node2D" parent="Answers"]
+position = Vector2(582, 626)
+script = ExtResource("slip")
+text = "Radio the valley"
+key = "3"
+angle = -0.012
+seed = 13
+
+[node name="Note" type="Node2D" parent="."]
+position = Vector2(884, 572)
+rotation = -0.044
+script = ExtResource("note")
+text = "Ridge route is iced. Take the gully, and keep the radio warm."
