@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Style catalog</title>
+<style>
+:root { --bg: #f6f5f2; --card: #ffffff; --ink: #1d1d22; --dim: #5d5d68; --line: #dddbd5; --link: #2357c9; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16161a; --card: #212127; --ink: #ececf0; --dim: #a3a3ad; --line: #34343c; --link: #8fb0ff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+.lede { color: var(--dim); margin: 0 0 24px; }
+.grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+article { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+article > a img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.body { padding: 14px 16px 16px; }
+h2 { font-size: 18px; margin: 0 0 2px; }
+code { font-size: 13px; color: var(--dim); }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 10px 0; font-size: 14px; }
+dt { color: var(--dim); }
+dd { margin: 0; }
+.links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+a { color: var(--link); }
+</style>
+</head>
+<body>
+<main>
+<h1>Style catalog</h1>
+<p class="lede">10 looks. Each is a starting point: a game keeps its rules and recipe and makes
+the palette, fonts, setting and cast its own. Open a demo to see the look running.</p>
+<div class="grid">
+<article>
+<a href="loud-ink-cast-quiet-stage/frames/key-scene.jpg"><img src="loud-ink-cast-quiet-stage/frames/key-scene.jpg" alt="Loud ink cast on a quiet stage: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Loud ink cast on a quiet stage</h2>
+<code>loud-ink-cast-quiet-stage</code>
+<dl>
+<dt>Medium</dt><dd>bold 2D illustration</dd>
+<dt>Framings</dt><dd>fixed-stage*, card-table, side</dd>
+<dt>Mood</dt><dd>loud, comic, grim, punchy, theatrical, playful</dd>
+<dt>Suits</dt><dd>dialogue-driven games, visual novels, small-cast drama, card games, management on one set</dd>
+<dt>Avoid for</dt><dd>3D, large maps, many units on screen, realistic tone</dd>
+<dt>Cost</dt><dd>medium</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="loud-ink-cast-quiet-stage/demo.html">Open the demo</a> <a href="loud-ink-cast-quiet-stage/frames/character.jpg">character</a> <a href="loud-ink-cast-quiet-stage/frames/prop.jpg">prop</a> <a href="loud-ink-cast-quiet-stage/frames/text-heavy.jpg">text-heavy</a> <a href="loud-ink-cast-quiet-stage/frames/dont.jpg">dont</a> <a href="loud-ink-cast-quiet-stage/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="loud-ink-cast-quiet-stage/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="chunky-bright-pixel-art/frames/key-scene.png"><img src="chunky-bright-pixel-art/frames/key-scene.png" alt="Chunky bright pixel art: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Chunky bright pixel art</h2>
+<code>chunky-bright-pixel-art</code>
+<dl>
+<dt>Medium</dt><dd>pixel art</dd>
+<dt>Framings</dt><dd>side, top-down, isometric</dd>
+<dt>Mood</dt><dd>bright, cheerful, energetic, crisp</dd>
+<dt>Suits</dt><dd>platformer, action-adventure, farming and life sim, tactics, trading and management, small-cast narrative</dd>
+<dt>Avoid for</dt><dd>photoreal or painterly tone, smooth camera zoom or rotation, horror that relies on darkness and gradients</dd>
+<dt>Cost</dt><dd>low</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="chunky-bright-pixel-art/demo.html">Open the demo</a> <a href="chunky-bright-pixel-art/frames/character.png">character</a> <a href="chunky-bright-pixel-art/frames/prop.png">prop</a> <a href="chunky-bright-pixel-art/frames/text-heavy.png">text-heavy</a> <a href="chunky-bright-pixel-art/frames/dont.png">dont</a> <a href="chunky-bright-pixel-art/frames/godot-key-scene.png">godot-key-scene</a> <a href="chunky-bright-pixel-art/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="cel-shaded-3d/frames/key-scene.jpg"><img src="cel-shaded-3d/frames/key-scene.jpg" alt="Cel-shaded 3D: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Cel-shaded 3D</h2>
+<code>cel-shaded-3d</code>
+<dl>
+<dt>Medium</dt><dd>cel-shaded 3D</dd>
+<dt>Framings</dt><dd>third-person, isometric</dd>
+<dt>Mood</dt><dd>bright, airy, adventurous, playful</dd>
+<dt>Suits</dt><dd>action-adventure, exploration, 3D platformer, rhythm action, creature collecting, cosy open world</dd>
+<dt>Avoid for</dt><dd>horror, grim realism, dense small-scale strategy interface, photoreal settings</dd>
+<dt>Cost</dt><dd>medium</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="cel-shaded-3d/demo.html">Open the demo</a> <a href="cel-shaded-3d/frames/character.jpg">character</a> <a href="cel-shaded-3d/frames/prop.jpg">prop</a> <a href="cel-shaded-3d/frames/text-heavy.jpg">text-heavy</a> <a href="cel-shaded-3d/frames/dont.jpg">dont</a> <a href="cel-shaded-3d/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="cel-shaded-3d/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="toybox-low-poly/frames/key-scene.jpg"><img src="toybox-low-poly/frames/key-scene.jpg" alt="Toybox low-poly: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Toybox low-poly</h2>
+<code>toybox-low-poly</code>
+<dl>
+<dt>Medium</dt><dd>low-poly 3D</dd>
+<dt>Framings</dt><dd>isometric, top-down</dd>
+<dt>Mood</dt><dd>calm, cosy, miniature, tidy</dd>
+<dt>Suits</dt><dd>city and village builders, grid puzzle, management on a grid, relaxing sandbox</dd>
+<dt>Avoid for</dt><dd>fast action and hit-reading, horror or tense tone, realistic settings, text-heavy narrative</dd>
+<dt>Cost</dt><dd>low</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="toybox-low-poly/demo.html">Open the demo</a> <a href="toybox-low-poly/frames/character.jpg">character</a> <a href="toybox-low-poly/frames/prop.jpg">prop</a> <a href="toybox-low-poly/frames/text-heavy.jpg">text-heavy</a> <a href="toybox-low-poly/frames/dont.jpg">dont</a> <a href="toybox-low-poly/frames/godot-key-scene.png">godot-key-scene</a> <a href="toybox-low-poly/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="neon-vector-glow/frames/key-scene.png"><img src="neon-vector-glow/frames/key-scene.png" alt="Neon vector glow: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Neon vector glow</h2>
+<code>neon-vector-glow</code>
+<dl>
+<dt>Medium</dt><dd>vector</dd>
+<dt>Framings</dt><dd>top-down, side, on-rails</dd>
+<dt>Mood</dt><dd>electric, kinetic, intense, abstract, arcade</dd>
+<dt>Suits</dt><dd>twin-stick shooters, arena survival, score attack, rhythm action, rail shooters, many targets on screen</dd>
+<dt>Avoid for</dt><dd>narrative and dialogue-heavy games, character drama, cosy tone, realistic settings</dd>
+<dt>Cost</dt><dd>low</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="neon-vector-glow/demo.html">Open the demo</a> <a href="neon-vector-glow/frames/character.png">character</a> <a href="neon-vector-glow/frames/prop.png">prop</a> <a href="neon-vector-glow/frames/text-heavy.png">text-heavy</a> <a href="neon-vector-glow/frames/dont.png">dont</a> <a href="neon-vector-glow/frames/godot-key-scene.png">godot-key-scene</a> <a href="neon-vector-glow/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="pixel-sprites-lit-diorama/frames/key-scene.jpg"><img src="pixel-sprites-lit-diorama/frames/key-scene.jpg" alt="Pixel sprites in a lit diorama: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Pixel sprites in a lit diorama</h2>
+<code>pixel-sprites-lit-diorama</code>
+<dl>
+<dt>Medium</dt><dd>pixel art, cel-shaded 3D</dd>
+<dt>Framings</dt><dd>fixed-stage*, isometric, tactics-grid, side</dd>
+<dt>Mood</dt><dd>miniature, storybook, cosy, bright, festive, nostalgic, hushed, wistful, tense, melancholy</dd>
+<dt>Suits</dt><dd>tactics and RPG scenes, management on one set, narrative strategy, small-cast character games, town and life sims seen as a diorama</dd>
+<dt>Avoid for</dt><dd>fast action needing precise hit-reading, big crowds of units, many readable targets at range, interface-dense management, a free-rotating close camera</dd>
+<dt>Cost</dt><dd>medium</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="pixel-sprites-lit-diorama/demo.html">Open the demo</a> <a href="pixel-sprites-lit-diorama/frames/character.jpg">character</a> <a href="pixel-sprites-lit-diorama/frames/prop.jpg">prop</a> <a href="pixel-sprites-lit-diorama/frames/text-heavy.jpg">text-heavy</a> <a href="pixel-sprites-lit-diorama/frames/dont.jpg">dont</a> <a href="pixel-sprites-lit-diorama/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="pixel-sprites-lit-diorama/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="ink-graphic-novel/frames/key-scene.jpg"><img src="ink-graphic-novel/frames/key-scene.jpg" alt="Ink graphic novel: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Ink graphic novel</h2>
+<code>ink-graphic-novel</code>
+<dl>
+<dt>Medium</dt><dd>bold 2D illustration</dd>
+<dt>Framings</dt><dd>fixed-panels*, side, top-down</dd>
+<dt>Mood</dt><dd>grim, tense, stoic, noir, melancholy, comic, pulpy, adventurous</dd>
+<dt>Suits</dt><dd>narrative adventure, story-led strategy and management, investigation and mystery, visual-novel beats, card or board games with a story spine, side-scrolling adventure or brawler, tactics on a map</dd>
+<dt>Avoid for</dt><dd>many tiny targets at speed, soft cosy pastel tone, dense number tables, anything that needs many colours to tell things apart</dd>
+<dt>Cost</dt><dd>low</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="ink-graphic-novel/demo.html">Open the demo</a> <a href="ink-graphic-novel/frames/character.jpg">character</a> <a href="ink-graphic-novel/frames/prop.jpg">prop</a> <a href="ink-graphic-novel/frames/text-heavy.jpg">text-heavy</a> <a href="ink-graphic-novel/frames/dont.jpg">dont</a> <a href="ink-graphic-novel/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="ink-graphic-novel/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="tabletop-diorama/frames/key-scene.jpg"><img src="tabletop-diorama/frames/key-scene.jpg" alt="Tabletop diorama: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Tabletop diorama</h2>
+<code>tabletop-diorama</code>
+<dl>
+<dt>Medium</dt><dd>low-poly 3D</dd>
+<dt>Framings</dt><dd>tabletop*, card-table, isometric</dd>
+<dt>Mood</dt><dd>cosy, playful, storybook, warm, whimsical, hushed</dd>
+<dt>Suits</dt><dd>cosy management, board-game-like tactics, narrative strategy, small-town life sim, puzzle on a board, card and dice games, folk tales and fables</dd>
+<dt>Avoid for</dt><dd>fast action and reflex play, large open worlds, many small simultaneous targets, first-person exploration</dd>
+<dt>Cost</dt><dd>medium</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="tabletop-diorama/demo.html">Open the demo</a> <a href="tabletop-diorama/frames/character.jpg">character</a> <a href="tabletop-diorama/frames/prop.jpg">prop</a> <a href="tabletop-diorama/frames/text-heavy.jpg">text-heavy</a> <a href="tabletop-diorama/frames/dont.jpg">dont</a> <a href="tabletop-diorama/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="tabletop-diorama/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="paper-theatre/frames/key-scene.jpg"><img src="paper-theatre/frames/key-scene.jpg" alt="Paper theatre: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Paper theatre</h2>
+<code>paper-theatre</code>
+<dl>
+<dt>Medium</dt><dd>paper cut-out</dd>
+<dt>Framings</dt><dd>fixed-stage*, side, tabletop</dd>
+<dt>Mood</dt><dd>whimsical, playful, theatrical, storybook, nostalgic, intimate, ominous</dd>
+<dt>Suits</dt><dd>narrative and choice-driven games, story-led roguelites, puzzle-adventures, fables and folk tales, chamber dramas, small-cast management on one set</dd>
+<dt>Avoid for</dt><dd>fast action and hit-reading, free camera, large maps or many units, dense information screens</dd>
+<dt>Cost</dt><dd>medium</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="paper-theatre/demo.html">Open the demo</a> <a href="paper-theatre/frames/character.jpg">character</a> <a href="paper-theatre/frames/prop.jpg">prop</a> <a href="paper-theatre/frames/text-heavy.jpg">text-heavy</a> <a href="paper-theatre/frames/dont.jpg">dont</a> <a href="paper-theatre/frames/godot-key-scene.jpg">godot-key-scene</a> <a href="paper-theatre/style.md">style.md</a></div>
+</div>
+</article>
+<article>
+<a href="retro-low-poly/frames/key-scene.png"><img src="retro-low-poly/frames/key-scene.png" alt="Retro low-poly: key scene" loading="lazy"></a>
+<div class="body">
+<h2>Retro low-poly</h2>
+<code>retro-low-poly</code>
+<dl>
+<dt>Medium</dt><dd>low-poly 3D</dd>
+<dt>Framings</dt><dd>first-person*, third-person, fixed-stage, tabletop, tactics-grid</dd>
+<dt>Mood</dt><dd>playful, nostalgic, bright, eerie, deadpan, cosy, tense</dd>
+<dt>Suits</dt><dd>first-person exploration and adventure, survival horror, 3D platformer, kart and arcade racing, narrative and investigation in one place, management on one set or table, tactics</dd>
+<dt>Avoid for</dt><dd>photoreal or painterly tone, many small readable pieces at a distance, precise long-range aiming, text drawn inside the 3D view</dd>
+<dt>Cost</dt><dd>low</dd>
+<dt>Engines</dt><dd>web, godot</dd>
+</dl>
+<div class="links"><a href="retro-low-poly/demo.html">Open the demo</a> <a href="retro-low-poly/frames/character.png">character</a> <a href="retro-low-poly/frames/prop.png">prop</a> <a href="retro-low-poly/frames/text-heavy.png">text-heavy</a> <a href="retro-low-poly/frames/dont.jpg">dont</a> <a href="retro-low-poly/frames/godot-key-scene.png">godot-key-scene</a> <a href="retro-low-poly/style.md">style.md</a></div>
+</div>
+</article>
+</div>
+</main>
+</body>
+</html>

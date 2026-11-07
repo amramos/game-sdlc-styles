@@ -1,0 +1,38 @@
+GIMP Palette
+Name: paper-theatre - example (bright matinee, a fairy-tale forest)
+Columns: 5
+# One instance of the colour structure in style.md (demo.html's "Matinee" scheme). Never ship it
+# as is: every game re-chooses each role, and its lighting, for its own tone. The demo's "Night"
+# scheme fills the same roles and passes the same rules.
+# Checked with the colour-rules (value = HSV V, chroma = S x V, contrast = WCAG ratio):
+#   ink on paper 13.13:1; ink on every tint, backdrop and depth role >= 3.69:1 (lowest tint-cloth)
+#   paper on card 8.11:1; every backdrop, depth row and the boards separate from paper or card >= 3.25:1
+#   depth rows against backdrop-sky: far 1.15 < mid 1.54 < near 2.56
+#   chroma of tints, backdrop, depth and proscenium <= 0.49 (ceiling 0.55); accent chroma 0.78
+#   accent hue >= 65 deg from every coloured tint and signal; signals on paper >= 5.24:1, chroma >= 0.30
+#   proscenium on house 2.63:1; light-key value 1.00
+ 43  33  24	ink              #2B2118
+243 234 210	paper            #F3EAD2
+ 90  62  43	card             #5A3E2B
+ 36  26  30	house            #241A1E
+168  56  46	proscenium       #A8382E
+122  90  64	boards           #7A5A40
+188 214 218	backdrop-sky     #BCD6DA
+180 196 142	backdrop-ground  #B4C48E
+175 201 191	depth-far        #AFC9BF
+147 178 131	depth-mid        #93B283
+101 139  86	depth-near       #658B56
+200  87  74	tint-cloth       #C8574A
+176 131  85	tint-wood        #B08355
+235 199 164	tint-skin        #EBC7A4
+154 150 143	tint-fur         #9A968F
+221 190 104	tint-straw       #DDBE68
+134 168 108	tint-foliage     #86A86C
+169 178 184	tint-metal       #A9B2B8
+ 15 163 214	accent           #0FA3D6
+ 34 110  47	signal-good      #226E2F
+156  42  30	signal-bad       #9C2A1E
+ 91  58 140	signal-info      #5B3A8C
+255 241 216	light-key        #FFF1D8
+221 233 242	light-fill       #DDE9F2
+255 217 160	light-foot       #FFD9A0

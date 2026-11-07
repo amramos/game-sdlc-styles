@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox low-poly demo</title>
+<style>
+  :root { --ink:#2F2A3D; --paper:#FBF4E6; --accent:#13C4B4; --shadow:#605D85; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--paper); }
+  body { font-family: ui-rounded, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color:var(--ink); }
+  canvas#c { display:block; position:absolute; left:0; top:0; }
+  body.frame canvas#c { width:1280px !important; height:720px !important; }
+
+  /* demo controls (hidden in frame mode) */
+  #controls { position:absolute; right:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; z-index:5; }
+  #controls label, #controls button, #controls select {
+    font:inherit; font-weight:700; font-size:15px; color:var(--ink); background:var(--paper);
+    border:3px solid var(--ink); border-radius:12px; padding:6px 10px; box-shadow:0 3px 0 var(--shadow);
+  }
+  #controls button[aria-pressed="true"] { background:var(--accent); }
+  body.frame #controls { display:none; }
+
+  /* the busiest screen: a 1280x720 box, scaled to fit outside frame mode */
+  #hud { position:absolute; left:0; top:0; width:1280px; height:720px; transform-origin:0 0; pointer-events:none; display:none; }
+  #hud.on { display:block; }
+  .panel { background:var(--paper); border:3px solid var(--ink); border-radius:14px; box-shadow:0 4px 0 var(--shadow); }
+  .res { position:absolute; left:16px; top:14px; display:flex; gap:8px; padding:8px 10px; }
+  .res div { display:flex; align-items:center; gap:6px; font-weight:800; font-size:18px; padding:0 4px; }
+  .res small { font-weight:700; font-size:16px; opacity:.75; }
+  .sw { width:18px; height:18px; border-radius:6px; border:2px solid var(--ink); flex:none; }
+  .chips { position:absolute; right:16px; top:14px; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:16px; padding:4px 10px 4px 5px;
+          border:3px solid var(--ink); border-radius:999px; color:var(--ink); }
+  .chip b { display:inline-grid; place-items:center; width:20px; height:20px; border-radius:50%; background:var(--ink); color:var(--paper); font-size:13px; }
+  .ok { background:var(--signal-ok); } .warn { background:var(--signal-warn); }
+  .blocked { background:var(--signal-blocked); } .info { background:var(--signal-info); }
+  .menu { position:absolute; left:16px; right:16px; bottom:14px; padding:10px; display:flex; gap:8px; }
+  .card { flex:1; min-width:0; background:var(--paper); border:3px solid var(--ink); border-radius:12px; padding:6px 7px; }
+  .card .ic { height:34px; border-radius:10px 10px 6px 6px; border:2px solid var(--ink); margin-bottom:4px; }
+  .card h4 { margin:0; font-size:16px; font-weight:800; line-height:1.1; min-height:2.2em; overflow-wrap:anywhere; }  /* names wrap to two lines, never truncate */
+  .card p { margin:3px 0 0; font-size:16px; font-weight:700; line-height:1.15; }
+  .card.sel { border-color:var(--accent); border-width:4px; transform:translateY(-10px); box-shadow:0 4px 0 var(--shadow); }
+  .card.no { opacity:.7; }
+  .card .chip { font-size:14px; padding:1px 7px 1px 3px; margin-top:3px; }
+  .card .chip b { width:16px; height:16px; font-size:11px; }
+  .tip { position:absolute; left:742px; top:200px;  /* below the chip column, never over it */ width:360px; padding:12px 14px; }
+  .tip h3 { margin:0 0 4px; font-size:22px; font-weight:800; }
+  .tip p { margin:0 0 8px; font-size:16px; font-weight:600; line-height:1.3; }
+  .tip ul { list-style:none; margin:0 0 8px; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:2px 10px; font-size:16px; font-weight:800; }
+  .tip li { display:flex; align-items:center; gap:6px; }
+  .tip .row { display:flex; flex-wrap:wrap; gap:6px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <label>Palette <select id="pal"></select></label>
+  <button id="bIso" aria-pressed="true">Isometric</button>
+  <button id="bTop" aria-pressed="false">Top-down</button>
+  <button id="bTilt" aria-pressed="true">Tilt-shift</button>
+  <button id="bHud" aria-pressed="false">Busiest screen</button>
+</div>
+
+<div id="hud">
+  <div class="panel res">
+    <div><span class="sw" style="background:var(--material-wood)"></span>Wood 128<small>/200</small></div>
+    <div><span class="sw" style="background:var(--material-stone)"></span>Stone 46<small>/120</small></div>
+    <div><span class="sw" style="background:var(--material-cap)"></span>Spores 9<small>/30</small></div>
+    <div><span class="sw" style="background:var(--material-leaf)"></span>Leaves 312<small>/400</small></div>
+    <div><span class="sw" style="background:var(--material-cloth)"></span>Villagers 7<small>/12</small></div>
+    <div>Day 14<small>· late autumn</small></div>
+  </div>
+  <div class="chips">
+    <span class="chip ok"><b>✓</b>Ready to build</span>
+    <span class="chip warn"><b>!</b>Needs a path on one side</span>
+    <span class="chip blocked"><b>×</b>Blocked: too close to a tower</span>
+    <span class="chip info"><b>i</b>2 villagers idle</span>
+  </div>
+  <div class="panel tip">
+    <h3>Toadstool tower</h3>
+    <p>Houses four villagers. Must touch a path on at least one side, and cannot stand next to another tower. While a villager works inside, it gives +2 spores at the end of each autumn day. Upkeep: 1 wood every 3 days; without it, the cap fades and the tower stops giving spores.</p>
+    <ul>
+      <li><span class="sw" style="background:var(--material-wood)"></span>Wood 30 / 128</li>
+      <li><span class="sw" style="background:var(--material-stone)"></span>Stone 12 / 46</li>
+      <li><span class="sw" style="background:var(--material-cap)"></span>Spores 6 / 9</li>
+      <li><span class="sw" style="background:var(--material-cloth)"></span>Beds +4</li>
+    </ul>
+    <div class="row">
+      <span class="chip ok"><b>✓</b>Can afford</span>
+      <span class="chip warn"><b>!</b>Path: 1 tile away</span>
+    </div>
+  </div>
+  <div class="panel menu">
+    <div class="card"><div class="ic" style="background:linear-gradient(var(--material-cap) 55%,var(--material-stem) 55%)"></div><h4>Mushroom house</h4><p>Wood 12 · Spores 2</p></div>
+    <div class="card"><div class="ic" style="background:linear-gradient(var(--material-cap) 40%,var(--material-stem) 40%)"></div><h4>Tall cap house</h4><p>Wood 18 · Spores 4</p></div>
+    <div class="card sel"><div class="ic" style="background:linear-gradient(var(--material-cap) 30%,var(--material-stem) 30%)"></div><h4>Toadstool tower</h4><p>Wood 30 · Stone 12 · Spores 6</p></div>
+    <div class="card"><div class="ic" style="background:linear-gradient(var(--material-leaf) 50%,var(--material-wood) 50%)"></div><h4>Leaf shed</h4><p>Leaves 40 · Wood 6</p></div>
+    <div class="card"><div class="ic" style="background:repeating-linear-gradient(90deg,var(--material-wood) 0 8px,var(--paper) 8px 16px)"></div><h4>Fence ×4</h4><p>Wood 4</p></div>
+    <div class="card"><div class="ic" style="background:var(--material-stone)"></div><h4>Stone path ×5</h4><p>Stone 5</p></div>
+    <div class="card"><div class="ic" style="background:linear-gradient(var(--signal-warn) 35%,var(--material-wood) 35%)"></div><h4>Lantern post</h4><p>Wood 3 · Spores 1</p></div>
+    <div class="card"><div class="ic" style="background:linear-gradient(var(--material-wood) 50%,var(--material-stone) 50%)"></div><h4>Acorn store</h4><p>Wood 20 · Stone 8</p></div>
+    <div class="card no"><div class="ic" style="background:var(--material-wood)"></div><h4>Bridge</h4><p>Wood 26 · Stone 50</p><span class="chip blocked"><b>×</b>Need 4 stone</span></div>
+  </div>
+</div>
+
+<!-- Palettes: every one fills the same roles and passes style.md's colour-rules.
+     "dont" is only for ?frame=dont and breaks them on purpose. -->
+<script type="application/json" id="palettes">
+{
+ "autumn": {"label":"Autumn","ink":"#2F2A3D","paper":"#FBF4E6","sky-top":"#A8C6E6","sky-low":"#F7DEC9","ground":"#A9BF88","path":"#EEDDBB","shadow":"#605D85","accent":"#13C4B4",
+  "signal-ok":"#A6DDA0","signal-warn":"#F7CF7A","signal-blocked":"#F2A0A0","signal-info":"#A9C9F5",
+  "material-cap":"#E5937E","material-stem":"#F4E8D6","material-wood":"#A88262","material-leaf":"#EAC27E","material-foliage":"#C6B771","material-stone":"#B9B5C6","material-cloth":"#8FA9D6"},
+ "spring": {"label":"Spring","ink":"#26314A","paper":"#F7F9F2","sky-top":"#9CCBEA","sky-low":"#E6F3E8","ground":"#9CCB95","path":"#F2E6C9","shadow":"#5E6C8E","accent":"#F030D0",
+  "signal-ok":"#A6DDA0","signal-warn":"#F7CF7A","signal-blocked":"#F2A0A0","signal-info":"#A9C9F5",
+  "material-cap":"#C3A8E0","material-stem":"#F5EEDD","material-wood":"#B39271","material-leaf":"#F6E08C","material-foliage":"#B5D98C","material-stone":"#BDC3C9","material-cloth":"#EFB27D"},
+ "winter": {"label":"Winter","ink":"#24293A","paper":"#F6F7FA","sky-top":"#B9D3EE","sky-low":"#F1E9F2","ground":"#E3E8EE","path":"#C9B9A4","shadow":"#727AA0","accent":"#00BFA6",
+  "signal-ok":"#A6DDA0","signal-warn":"#F7CF7A","signal-blocked":"#F2A0A0","signal-info":"#A9C9F5",
+  "material-cap":"#D99090","material-stem":"#F2EBE3","material-wood":"#9C7E66","material-leaf":"#D9C79A","material-foliage":"#9DBB8F","material-stone":"#AEB3C2","material-cloth":"#E3A3B8"}
+}
+</script>
+<script type="application/json" id="dont-palette">
+{"label":"Don't","ink":"#000000","paper":"#FFFFFF","sky-top":"#0030FF","sky-low":"#FF00AA","ground":"#1FD11F","path":"#FFE600","shadow":"#000000","accent":"#FF0040",
+ "signal-ok":"#00FF00","signal-warn":"#FFFF00","signal-blocked":"#FF0000","signal-info":"#0000FF",
+ "material-cap":"#FF0040","material-stem":"#00A0FF","material-wood":"#7A00FF","material-leaf":"#FF7A00","material-foliage":"#00FF90","material-stone":"#FF00C8","material-cloth":"#FF0040"}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
+import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
+
+// ---------- setup ----------
+const params = new URLSearchParams(location.search);
+const FRAME = params.get('frame');                 // key-scene | character | prop | text-heavy | dont
+const DONT = FRAME === 'dont';
+const PALETTES = JSON.parse(document.getElementById('palettes').textContent);
+const DONT_PAL = JSON.parse(document.getElementById('dont-palette').textContent);
+let palName = PALETTES[params.get('palette')] ? params.get('palette') : 'autumn';
+const pal = () => DONT ? DONT_PAL : PALETTES[palName];
+if (FRAME) document.body.classList.add('frame');
+let needRender = true, activeUntil = 0, last = 0, running = false;
+
+// seeded random, so every frame is the same on every run
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(20261107);
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(FRAME ? 1 : Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.NoToneMapping;              // keep the palette's colours as authored
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = DONT ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+
+// ---------- materials: one flat colour per material role, no textures ----------
+const mats = {};
+function mat(role) {
+  if (!mats[role]) mats[role] = new THREE.MeshStandardMaterial({
+    color: pal()[role], roughness: 1, metalness: 0, flatShading: !DONT, vertexColors: true });
+  return mats[role];
+}
+const ghostMat = new THREE.MeshStandardMaterial({ color: pal().paper, emissive: pal().accent, emissiveIntensity: 0.25,
+  roughness: 1, flatShading: true, transparent: true, opacity: 0.7, depthWrite: false });
+const ringMat = new THREE.MeshBasicMaterial({ color: pal().accent, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+const markerMat = new THREE.MeshBasicMaterial({ color: pal().accent });
+
+// ---------- geometry helpers ----------
+const SEG = n => DONT ? n * 6 : n;   // the "don't" frame multiplies every segment count
+
+// Box with a single 45-degree chamfer on every edge: the cheapest "rounded toy" edge.
+function chamferBox(w, h, d, b) {
+  if (DONT) return new THREE.BoxGeometry(w, h, d, 4, 4, 4);
+  const x = w / 2 - b, z = d / 2 - b, depth = Math.max(h - 2 * b, 0.001);
+  const s = new THREE.Shape();
+  s.moveTo(-x, -z); s.lineTo(x, -z); s.lineTo(x, z); s.lineTo(-x, z);
+  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, curveSegments: 1 });
+  g.rotateX(-Math.PI / 2); g.translate(0, -depth / 2, 0);
+  return g;
+}
+
+// Baked "AO": darken vertices near the ground (0.72 at y=0 up to 1.0 at y=0.55).
+function bakeAO(g, lo = 0, hi = 0.55, min = 0.72) {
+  const p = g.attributes.position, c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    let t = DONT ? 1 : THREE.MathUtils.smoothstep(p.getY(i), lo, hi);
+    const v = min + (1 - min) * t; c[i * 3] = c[i * 3 + 1] = c[i * 3 + 2] = v;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
+
+// Add a part to a group: transform is baked into the geometry so y = height above ground.
+function part(group, geom, role, pos = [0, 0, 0], rot = [0, 0, 0], scl = [1, 1, 1], ao = true) {
+  const m4 = new THREE.Matrix4().compose(new THREE.Vector3(...pos),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scl));
+  geom.applyMatrix4(m4);
+  if (ao) bakeAO(geom); else bakeAO(geom, -1, -0.99);
+  const mesh = new THREE.Mesh(geom, role === 'ghost' ? ghostMat : mat(role));
+  mesh.castShadow = role !== 'ghost'; mesh.receiveShadow = true;
+  group.add(mesh); return mesh;
+}
+
+// Soft contact shadow: a radial blob under each object, in the shadow role.
+const blobTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, color: pal().shadow, transparent: true, opacity: 0.45,
+  depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+function blob(group, r, y = 0.006) {
+  if (DONT) return;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2), blobMat);
+  m.rotation.x = -Math.PI / 2; m.position.y = y; m.renderOrder = 1; group.add(m);
+}
+
+// ---------- props ----------
+function house(o = {}) {
+  const g = new THREE.Group(), w = o.w ?? 1, sh = o.stemH ?? 0.9, cr = o.capR ?? 0.72, ch = o.capH ?? 0.75;
+  const role = r => o.ghost ? 'ghost' : r;
+  part(g, new THREE.CylinderGeometry(0.36 * w, 0.46 * w, sh, SEG(8)), role('material-stem'), [0, sh / 2, 0]);
+  if (o.built !== false) {
+    part(g, new THREE.SphereGeometry(cr, SEG(8), SEG(4), 0, Math.PI * 2, 0, Math.PI / 2), role('material-cap'), [0, sh - 0.06, 0], [0, Math.PI / 8, 0], [1, ch, 1]);
+    part(g, new THREE.CircleGeometry(cr, SEG(8)), role('material-stem'), [0, sh - 0.06, 0], [Math.PI / 2, 0, Math.PI / 8]);
+    for (const [phi, th, s] of [[0.75, 0.6, 1], [0.5, 2.6, 0.8], [0.95, 4.4, 0.9]]) {
+      const x = cr * Math.sin(phi) * Math.cos(th), z = cr * Math.sin(phi) * Math.sin(th), y = sh - 0.06 + ch * cr * Math.cos(phi);
+      part(g, new THREE.IcosahedronGeometry(0.1 * s, DONT ? 3 : 0), role('material-stem'), [x, y, z], [phi * Math.cos(th + Math.PI / 2), 0, -phi * Math.sin(th + Math.PI / 2)], [1, 0.45, 1]);
+    }
+  }
+  const zr = 0.42 * w;
+  part(g, chamferBox(0.26, 0.42, 0.08, 0.025), role('material-wood'), [0, 0.21, zr]);
+  if (sh > 0.6) part(g, chamferBox(0.16, 0.16, 0.06, 0.02), role('material-wood'), [Math.sin(0.9) * 0.38 * w, sh * 0.62, Math.cos(0.9) * 0.38 * w], [0, 0.9, 0]);
+  part(g, chamferBox(0.32, 0.05, 0.18, 0.015), role('material-stone'), [0, 0.025, zr + 0.18]);
+  if (!o.ghost) blob(g, 0.8 * w);
+  return g;
+}
+function tree(kind) {
+  const g = new THREE.Group();
+  part(g, new THREE.CylinderGeometry(0.07, 0.1, 0.5, SEG(6)), 'material-wood', [0, 0.25, 0]);
+  const r = kind === 'leaf' ? 'material-leaf' : 'material-foliage';
+  part(g, new THREE.IcosahedronGeometry(0.4, DONT ? 4 : 0), r, [0, 0.72, 0]);
+  part(g, new THREE.IcosahedronGeometry(0.28, DONT ? 4 : 0), r, [0.05, 1.04, -0.02], [0.4, 0.3, 0]);
+  blob(g, 0.55); return g;
+}
+function leafPile() {
+  const g = new THREE.Group();
+  part(g, new THREE.IcosahedronGeometry(0.28, DONT ? 3 : 0), 'material-leaf', [0, 0.06, 0], [0, rnd() * 3, 0], [1, 0.5, 1]);
+  part(g, new THREE.IcosahedronGeometry(0.15, DONT ? 3 : 0), 'material-cap', [0.08, 0.18, 0.04], [0.5, 0, 0], [1, 0.55, 1]);
+  blob(g, 0.4); return g;
+}
+function stone() {
+  const g = new THREE.Group();
+  part(g, new THREE.DodecahedronGeometry(0.14, DONT ? 3 : 0), 'material-stone', [0, 0.05, 0], [rnd(), rnd(), 0], [1, 0.6, 1]);
+  blob(g, 0.22); return g;
+}
+function fenceRun(g, ax, az, bx, bz) {
+  const len = Math.hypot(bx - ax, bz - az), n = Math.round(len / 0.5), ang = Math.atan2(bz - az, bx - ax);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    part(g, chamferBox(0.09, 0.38, 0.09, 0.02), 'material-wood', [ax + (bx - ax) * t, 0.19, az + (bz - az) * t]);
+  }
+  for (const y of [0.14, 0.28]) part(g, chamferBox(len, 0.06, 0.04, 0.015), 'material-wood',
+    [(ax + bx) / 2, y, (az + bz) / 2], [0, -ang, 0]);
+}
+function villager(carry) {
+  const g = new THREE.Group();
+  part(g, new THREE.CylinderGeometry(0.14, 0.2, 0.38, SEG(8)), 'material-cloth', [0, 0.19, 0]);
+  part(g, new THREE.IcosahedronGeometry(0.16, DONT ? 4 : 1), 'material-stem', [0, 0.52, 0]);
+  part(g, new THREE.SphereGeometry(0.21, SEG(8), SEG(3), 0, Math.PI * 2, 0, Math.PI / 2), 'material-cap', [0, 0.6, 0], [0, 0, 0], [1, 0.7, 1]);
+  part(g, new THREE.CircleGeometry(0.21, SEG(8)), 'material-stem', [0, 0.6, 0], [Math.PI / 2, 0, 0]);
+  for (const s of [-1, 1]) {
+    part(g, chamferBox(0.035, 0.06, 0.03, 0.008), 'ink', [s * 0.06, 0.53, 0.15], [0, 0, 0], [1, 1, 1], false);
+    part(g, new THREE.CapsuleGeometry(0.045, 0.14, 2, SEG(6)), 'material-cloth', [s * 0.16, 0.26, 0.08], [-1.0, 0, s * 0.25]);
+  }
+  if (carry) part(g, chamferBox(0.62, 0.05, 0.12, 0.015), 'material-wood', [0, 0.27, 0.2], [0, 0, 0.08]);
+  blob(g, 0.3); return g;
+}
+function constructionSite() {
+  const g = house({ stemH: 0.45, built: false });
+  for (const [x, z] of [[-0.55, -0.55], [0.55, -0.55], [0.55, 0.55], [-0.55, 0.55]])
+    part(g, chamferBox(0.07, 1.05, 0.07, 0.015), 'material-wood', [x, 0.525, z]);
+  part(g, chamferBox(1.2, 0.05, 0.12, 0.015), 'material-wood', [0, 0.8, -0.55]);
+  part(g, chamferBox(0.12, 0.05, 1.2, 0.015), 'material-wood', [0.55, 0.8, 0]);
+  for (let i = 0; i < 3; i++) part(g, chamferBox(0.6, 0.05, 0.12, 0.015), 'material-wood', [-0.85, 0.025 + i * 0.05, 0.75 - i * 0.02], [0, 0.6 + i * 0.12, 0]);
+  return g;
+}
+// Interaction marker: a floating accent diamond over things the player can act on.
+const markers = [];
+function marker(g, y) {
+  const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), markerMat);
+  m.scale.set(1, 1.4, 1); m.position.y = y; m.userData.baseY = y; g.add(m); markers.push(m);
+}
+
+// ---------- the village: a 12x12 grid of 1-unit tiles ----------
+const N = 12, tileX = i => i - N / 2 + 0.5;
+const village = new THREE.Group(); scene.add(village);
+const occupied = new Set(), key = (i, j) => i + ',' + j;
+
+const island = new THREE.Group(); village.add(island);
+part(island, chamferBox(N + 0.4, 0.9, N + 0.4, 0.3), 'ground', [0, -0.45, 0], [0, 0, 0], [1, 1, 1], false);
+bakeAO(island.children[0].geometry, -0.9, 0, 0.8);
+
+const pathTiles = [];
+for (let i = 1; i <= 10; i++) pathTiles.push([i, 6]);
+for (let j = 2; j <= 5; j++) pathTiles.push([5, j]);
+for (let j = 7; j <= 10; j++) pathTiles.push([8, j]);
+for (const [i, j] of pathTiles) {
+  occupied.add(key(i, j));
+  if (DONT) {     // coplanar with the ground: z-fighting on purpose
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: pal().path }));
+    m.rotation.x = -Math.PI / 2; m.position.set(tileX(i), 0, tileX(j)); m.receiveShadow = true; village.add(m);
+  } else {        // a slab raised 0.04 above the ground: never coplanar
+    part(village, chamferBox(0.94, 0.07, 0.94, 0.025), 'path', [tileX(i), 0.005, tileX(j)], [0, 0, 0], [1, 1, 1], false);
+  }
+}
+function place(obj, i, j, rotY = 0) {
+  obj.position.set(tileX(i), 0, tileX(j)); obj.rotation.y = rotY; village.add(obj); occupied.add(key(i, j)); return obj;
+}
+place(house(), 3, 4);
+place(house({ stemH: 1.25, capR: 0.66, capH: 0.9 }), 7, 4);
+place(house({ capR: 0.8, capH: 0.6 }), 3, 8, Math.PI);
+place(house({ stemH: 1.1 }), 10, 4);
+place(house({ w: 0.9, capR: 0.65 }), 10, 9, -Math.PI / 2);
+const site = place(constructionSite(), 6, 8); marker(site, 1.45);
+for (const [i, j, k] of [[1, 1, 'f'], [0, 3, 'leaf'], [11, 1, 'f'], [11, 7, 'leaf'], [0, 10, 'f'], [2, 11, 'leaf'], [1, 4, 'f'], [11, 11, 'f'], [6, 0, 'leaf'], [8, 1, 'f']])
+  place(tree(k), i, j, rnd() * 6);
+for (const [i, j] of [[4, 10], [9, 7], [2, 2], [7, 10]]) place(leafPile(), i, j);
+for (const [i, j] of [[1, 9], [6, 4], [11, 5]]) place(stone(), i, j);
+const fences = new THREE.Group(); village.add(fences);
+fenceRun(fences, tileX(9) - 0.5, tileX(8) - 0.5, tileX(11) + 0.45, tileX(8) - 0.5);
+fenceRun(fences, tileX(2) - 0.5, tileX(7) - 0.5, tileX(4) + 0.5, tileX(7) - 0.5);
+// scattered single leaves: the smallest detail, 0.12 of a tile
+for (let n = 0; n < 40; n++) {
+  const x = (rnd() - 0.5) * (N - 0.6), z = (rnd() - 0.5) * (N - 0.6);
+  part(village, chamferBox(0.12, 0.02, 0.08, 0.005), rnd() < 0.5 ? 'material-leaf' : 'material-cap', [x, 0.012, z], [0, rnd() * 6, 0], [1, 1, 1], false);
+}
+const v1 = place(villager(true), 5, 6, 0.6); marker(v1, 0.95);
+const v2 = place(villager(false), 8, 7, 1.2); marker(v2, 0.95);
+
+// placement ghost and tile ring
+const ghost = house({ ghost: true, stemH: 1.25, capR: 0.66, capH: 0.9 }); village.add(ghost);
+const ring = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.68, 4, 1, Math.PI / 4), ringMat);
+ring.rotation.x = -Math.PI / 2; village.add(ring);
+function showCursor(i, j) {
+  const free = i >= 0 && j >= 0 && i < N && j < N && !occupied.has(key(i, j));
+  ring.visible = i >= 0 && j >= 0 && i < N && j < N;
+  ring.position.set(tileX(i), 0.08, tileX(j));
+  ring.material.color.set(free ? pal().accent : pal()['signal-blocked']);
+  ghost.visible = free; ghost.position.set(tileX(i), 0, tileX(j));
+}
+showCursor(6, 2);
+
+// ---------- single-subject stages for the character and prop frames ----------
+const solo = new THREE.Group(); scene.add(solo); solo.visible = false;
+function soloStage(obj, r) {
+  solo.clear();
+  part(solo, new THREE.CylinderGeometry(r, r, 0.2, SEG(10)), 'ground', [0, -0.1, 0], [0, 0, 0], [1, 1, 1], false);
+  solo.add(obj);
+}
+
+// ---------- lights: one soft sun + hemisphere fill, ratio lit:shadow about 1.7:1 ----------
+const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, DONT ? 0.2 : 2.2); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xFFF3E0, DONT ? 4.0 : 1.6);
+sun.position.set(-7, 16, 9); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 50 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+
+// ---------- sky gradient + fog ----------
+const skyCanvas = document.createElement('canvas'); skyCanvas.width = 2; skyCanvas.height = 256;
+const skyTex = new THREE.CanvasTexture(skyCanvas); skyTex.colorSpace = THREE.SRGBColorSpace;
+scene.background = skyTex;
+
+function applyPalette() {
+  const p = pal();
+  for (const [role, m] of Object.entries(mats)) m.color.set(p[role] ?? p.ink);
+  ghostMat.color.set(p.paper); ghostMat.emissive.set(p.accent); markerMat.color.set(p.accent);
+  blobMat.color.set(p.shadow);
+  hemi.color.set(p['sky-top']).lerp(new THREE.Color(0xffffff), 0.45);
+  hemi.groundColor.set(DONT ? '#000000' : p.shadow);
+  const x = skyCanvas.getContext('2d'), gr = x.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, p['sky-top']); gr.addColorStop(0.75, p['sky-low']); gr.addColorStop(1, p['sky-low']);
+  x.fillStyle = gr; x.fillRect(0, 0, 2, 256); skyTex.needsUpdate = true;
+  scene.fog = DONT ? null : new THREE.Fog(p['sky-low'], fogNear, fogFar);
+  for (const [role, hex] of Object.entries(p)) document.documentElement.style.setProperty('--' + role, hex);
+  showCursor(Math.round(ghost.position.x + N / 2 - 0.5), Math.round(ghost.position.z + N / 2 - 0.5));
+  requestRender();
+}
+
+// ---------- cameras (framings) ----------
+let camera, framing = 'iso', fogNear = 43, fogFar = 66;
+const ISO_PITCH = Math.atan(1 / Math.SQRT2);          // 35.264 deg: true isometric
+function orthoCam(viewH, yawDeg, pitchRad, target, dist = 40) {
+  const a = W() / H(), c = new THREE.OrthographicCamera(-viewH * a / 2, viewH * a / 2, viewH / 2, -viewH / 2, 0.1, 200);
+  const yaw = THREE.MathUtils.degToRad(yawDeg);
+  c.position.set(target.x + dist * Math.cos(pitchRad) * Math.sin(yaw), target.y + dist * Math.sin(pitchRad), target.z + dist * Math.cos(pitchRad) * Math.cos(yaw));
+  c.lookAt(target); c.userData.viewH = viewH; return c;
+}
+function setFraming(f) {
+  framing = f;
+  if (f === 'iso') { camera = orthoCam(11.5, 45, ISO_PITCH, new THREE.Vector3(0, 0, 0.3)); fogNear = 43; fogFar = 66; }
+  else {           // top-down: steep perspective, narrow FOV, so the toys keep their sides
+    camera = new THREE.PerspectiveCamera(30, W() / H(), 0.5, 200);
+    const pitch = THREE.MathUtils.degToRad(62), dist = 26;
+    camera.position.set(0, dist * Math.sin(pitch), 0.6 + dist * Math.cos(pitch)); camera.lookAt(0, 0, 0.6);
+    fogNear = 26; fogFar = 48;
+  }
+  renderPass && (renderPass.camera = camera);
+  document.getElementById('bIso').setAttribute('aria-pressed', f === 'iso');
+  document.getElementById('bTop').setAttribute('aria-pressed', f === 'top');
+  applyPalette();
+}
+
+// ---------- post: optional tilt-shift ----------
+const W = () => FRAME ? 1280 : innerWidth, H = () => FRAME ? 720 : innerHeight;
+const rt = new THREE.WebGLRenderTarget(W(), H(), { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+let renderPass = null;
+setFraming('iso');
+renderPass = new RenderPass(scene, camera); composer.addPass(renderPass);
+const hTilt = new ShaderPass(HorizontalTiltShiftShader), vTilt = new ShaderPass(VerticalTiltShiftShader);
+composer.addPass(hTilt); composer.addPass(vTilt); composer.addPass(new OutputPass());
+let tilt = !DONT;
+function setTilt(on) { tilt = on; hTilt.enabled = vTilt.enabled = on; document.getElementById('bTilt').setAttribute('aria-pressed', on); requestRender(); }
+function resize() {
+  renderer.setSize(W(), H(), !FRAME); composer.setSize(W(), H());
+  const a = W() / H();
+  if (camera.isOrthographicCamera) { const v = camera.userData.viewH; Object.assign(camera, { left: -v * a / 2, right: v * a / 2 }); }
+  else camera.aspect = a;
+  camera.updateProjectionMatrix();
+  const blur = 2.5;   // pixels of blur per unit distance from the focus line, at 720p
+  hTilt.uniforms.h.value = blur / W() * (H() / 720); vTilt.uniforms.v.value = blur / H() * (H() / 720);
+  hTilt.uniforms.r.value = vTilt.uniforms.r.value = 0.48;   // focus line, from the bottom
+  const hud = document.getElementById('hud'), s = FRAME ? 1 : Math.min(W() / 1280, H() / 720);
+  hud.style.transform = `scale(${s})`;
+  requestRender();
+}
+
+// ---------- frames ----------
+function setupFrame(f) {
+  if (f === 'character') {
+    village.visible = false; solo.visible = true; soloStage(villager(true), 0.7); setTilt(false);
+    camera = orthoCam(1.55, 30, THREE.MathUtils.degToRad(14), new THREE.Vector3(0, 0.36, 0)); renderPass.camera = camera;
+    scene.fog = null;
+  } else if (f === 'prop') {
+    village.visible = false; solo.visible = true; soloStage(house({ stemH: 1.1 }), 1.05); setTilt(false);
+    camera = orthoCam(2.9, 40, THREE.MathUtils.degToRad(28), new THREE.Vector3(0, 0.75, 0)); renderPass.camera = camera;
+    scene.fog = null;
+  } else if (f === 'text-heavy') {
+    document.getElementById('hud').classList.add('on');
+  }
+  setTilt(f === 'key-scene' || f === 'text-heavy');
+}
+
+// ---------- animation and render loop ----------
+const anims = [];
+const easeOutBack = t => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
+const fixedT = 0.8;   // the time every frame-mode render uses
+function requestRender() { needRender = true; activeUntil = performance.now() + 300; kick(); }
+function update(t) {
+  for (const m of markers) { m.position.y = m.userData.baseY + Math.sin(t * 2.4) * 0.05; m.rotation.y = t * 1.2; }
+  v1.position.y = Math.abs(Math.sin(t * 3)) * 0.03;
+  const now = performance.now() / 1000;
+  for (let k = anims.length - 1; k >= 0; k--) {
+    const a = anims[k], u = Math.min((now - a.t0) / 0.42, 1);
+    const s = 0.6 + 0.4 * easeOutBack(u);
+    a.obj.scale.set(s, s, s); a.obj.position.y = 0.6 * Math.pow(1 - Math.min(u / 0.45, 1), 2);
+    if (u >= 1) { a.obj.scale.set(1, 1, 1); a.obj.position.y = 0; anims.splice(k, 1); }
+  }
+}
+let frameCount = 0;
+function loop(ms) {
+  if (FRAME) {
+    update(fixedT); composer.render();
+    if (++frameCount < 10) requestAnimationFrame(loop); else document.title = 'ready';
+    return;
+  }
+  if (document.hidden) { running = false; return; }
+  const busy = anims.length > 0 || ms < activeUntil;
+  if (busy || needRender || ms - last >= 100) {   // about 10 fps when idle
+    update(ms / 1000); composer.render(); last = ms; needRender = false;
+  }
+  requestAnimationFrame(loop);
+}
+function kick() { if (!FRAME && !running && !document.hidden) { running = true; requestAnimationFrame(loop); } }
+document.addEventListener('visibilitychange', kick);
+
+// ---------- interaction (outside frame mode) ----------
+const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
+function tileAt(e) {
+  ray.setFromCamera(new THREE.Vector2(e.clientX / W() * 2 - 1, -(e.clientY / H()) * 2 + 1), camera);
+  if (!ray.ray.intersectPlane(plane, hit)) return null;
+  return [Math.floor(hit.x + N / 2), Math.floor(hit.z + N / 2)];
+}
+if (!FRAME) {
+  canvas.addEventListener('pointermove', e => { const t = tileAt(e); if (t) showCursor(...t); requestRender(); });
+  canvas.addEventListener('click', e => {
+    const t = tileAt(e); if (!t) return;
+    const [i, j] = t;
+    if (i < 0 || j < 0 || i >= N || j >= N || occupied.has(key(i, j))) return;
+    const h = place(house({ stemH: 0.8 + rnd() * 0.5, capR: 0.62 + rnd() * 0.16 }), i, j);
+    anims.push({ obj: h, t0: performance.now() / 1000 }); showCursor(i, j); requestRender();
+  });
+  const sel = document.getElementById('pal');
+  for (const [k, p] of Object.entries(PALETTES)) sel.add(new Option(p.label, k, false, k === palName));
+  sel.onchange = () => { palName = sel.value; applyPalette(); };
+  document.getElementById('bIso').onclick = () => { setFraming('iso'); resize(); };
+  document.getElementById('bTop').onclick = () => { setFraming('top'); resize(); };
+  document.getElementById('bTilt').onclick = () => setTilt(!tilt);
+  document.getElementById('bHud').onclick = e => {
+    const on = document.getElementById('hud').classList.toggle('on'); e.currentTarget.setAttribute('aria-pressed', on);
+  };
+  addEventListener('resize', resize);
+}
+
+// ---------- start ----------
+applyPalette();
+setTilt(tilt);
+if (FRAME) setupFrame(FRAME);
+resize();
+if (FRAME) requestAnimationFrame(loop); else kick();
+</script>
+</body>
+</html>

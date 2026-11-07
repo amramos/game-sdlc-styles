@@ -1,0 +1,29 @@
+GIMP Palette
+Name: cel-shaded-3d - example
+Columns: 4
+# One instance of the colour structure in style.md, for sky islands at noon. Never ship it as is:
+# every game re-chooses each role for its own tone. Checked against every colour-rule (value = HSV V,
+# chroma = S x V, contrast = WCAG ratio): ink value 0.23, chroma 0.10; ink on panel 14.8:1; ink on
+# each signal 6.8-12.0:1; ink on each base 3.4-11.0:1; ink on sky-horizon 13.0:1; base value >= 0.76,
+# chroma 0.33-0.65 < accent 0.75; accent hue >= 35 deg from every base and sky, >= 45 deg from every
+# signal; shadow-tint hue 229, value 0.91, chroma 0.35; key hue 41, chroma 0.15; sky-horizon value
+# 1.00, chroma 0.19; sky-top value 0.90; sky chroma max 0.67 < accent 0.75.
+ 36  32  58	ink            #24203A
+255 243 218	key            #FFF3DA
+143 160 232	shadow-tint    #8FA0E8
+ 58 142 230	sky-top        #3A8EE6
+207 239 255	sky-horizon    #CFEFFF
+255 255 255	cloud          #FFFFFF
+108 203  74	base-grass     #6CCB4A
+208 154  98	base-rock      #D09A62
+194 122  66	base-wood      #C27A42
+217  72  59	base-roof      #D9483B
+ 47 114 214	base-cloth     #2F72D6
+255 207 170	base-skin      #FFCFAA
+155 107 224	base-hair      #9B6BE0
+255  63 160	accent         #FF3FA0
+255 248 234	panel          #FFF8EA
+127 219 255	signal-wind    #7FDBFF
+255 140 102	signal-storm   #FF8C66
+255 224 102	signal-fragile #FFE066
+142 224 122	signal-time    #8EE07A

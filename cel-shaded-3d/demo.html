@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cel-shaded 3D demo</title>
+<style>
+  :root {
+    --ink: #24203A; --panel: #FFF8EA; --accent: #FF3FA0;
+    --signal-wind: #7FDBFF; --signal-storm: #FF8C66; --signal-fragile: #FFE066; --signal-time: #8EE07A;
+    --base-grass: #6CCB4A; --base-rock: #D09A62; --base-wood: #C27A42; --base-roof: #D9483B;
+    --base-cloth: #2F72D6; --base-hair: #9B6BE0; --cloud: #FFFFFF;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #CFEFFF; }
+  canvas { display: block; }
+  body.frame canvas { width: 1280px !important; height: 720px !important; }
+
+  /* Controls (free mode only) */
+  #controls {
+    position: fixed; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px;
+    max-width: calc(100vw - 24px); font: 700 14px "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  #controls button, #controls a {
+    background: var(--panel); color: var(--ink); border: 2px solid var(--ink); border-radius: 8px;
+    padding: 5px 10px; font: inherit; cursor: pointer; text-decoration: none; box-shadow: 0 3px 0 var(--ink);
+  }
+  #controls button.on { background: var(--ink); color: var(--panel); }
+  #controls .sep { width: 8px; }
+  body.frame #controls { display: none; }
+
+  /* Interface: same rules as the world. Flat fill, ink border, rounded, hard offset shadow.
+     Sizes are for a 1280x720 viewport (2/3 of 1080p): 2 px border, 16 px minimum text. */
+  .ui { position: fixed; inset: 0; pointer-events: none; display: none; color: var(--ink);
+        font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+  .ui.show { display: block; }
+  body.frame .ui { right: auto; bottom: auto; width: 1280px; height: 720px; }  /* frames: pinned 1280x720 */
+  .panel { position: absolute; background: var(--panel); border: 2px solid var(--ink);
+           border-radius: 8px; box-shadow: 0 3px 0 var(--ink); box-sizing: border-box; }
+  .display { font-weight: 900; letter-spacing: 0.01em; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; border: 2px solid var(--ink);
+          border-radius: 999px; padding: 0 8px; font-size: 16px; font-weight: 800; line-height: 22px;
+          text-transform: uppercase; white-space: nowrap; }
+  .chip.wind { background: var(--signal-wind); }
+  .chip.storm { background: var(--signal-storm); }
+  .chip.fragile { background: var(--signal-fragile); }
+  .chip.time { background: var(--signal-time); }
+
+  #quest { left: 16px; top: 16px; width: 384px; padding: 10px 12px; }
+  #quest h2 { margin: 0 0 6px; font-size: 22px; }
+  #quest .row { padding: 5px 0; border-top: 2px solid var(--ink); }
+  #quest .row .t { font-size: 16px; font-weight: 800; }
+  #quest .row .m { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 16px; margin-top: 3px; }
+  #quest .row.active .t::before { content: "\25B6  "; color: var(--accent); -webkit-text-stroke: 1px var(--ink); }
+
+  #hud { right: 16px; top: 16px; width: 312px; padding: 8px 12px; font-size: 16px; }
+  #hud .nums { display: flex; justify-content: space-between; font-weight: 800; }
+  #hud .nums b { font-size: 22px; font-weight: 900; }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+
+  #inv { right: 16px; top: 132px; width: 312px; padding: 8px 10px 10px; }
+  #inv h2 { margin: 0 0 6px; font-size: 20px; display: flex; justify-content: space-between; }
+  #inv .grid { display: grid; grid-template-columns: repeat(4, 66px); gap: 6px; }
+  #inv .slot { position: relative; height: 66px; border: 2px solid var(--ink); border-radius: 6px;
+               background: #fff; box-sizing: border-box; }
+  #inv .slot i { position: absolute; left: 50%; top: 9px; width: 30px; height: 30px; margin-left: -15px;
+                 border: 2px solid var(--ink); border-radius: 50%; box-sizing: border-box; }
+  #inv .slot i.sq { border-radius: 4px; }
+  #inv .slot span { position: absolute; right: 4px; bottom: 1px; font-size: 16px; font-weight: 900; }
+  #inv .slot.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+  #inv .tip { margin-top: 8px; font-size: 16px; line-height: 21px; }
+  #inv .tip b { display: block; font-size: 18px; font-weight: 900; }
+
+  #dialogue { left: 16px; bottom: 16px; width: 900px; padding: 22px 16px 12px; }
+  #dialogue .name { position: absolute; left: 14px; top: -16px; background: var(--ink); color: var(--panel);
+                    border-radius: 6px; padding: 2px 10px; font-size: 20px; }
+  #dialogue p { margin: 0; font-size: 21px; line-height: 28px; }
+  #dialogue .opts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  #dialogue .opt { border: 2px solid var(--ink); border-radius: 8px; padding: 2px 10px; font-size: 18px;
+                   font-weight: 800; background: #fff; }
+  #dialogue .opt.focus { background: var(--ink); color: var(--panel); box-shadow: 0 3px 0 var(--accent); }
+  #dialogue .opt kbd { font: inherit; font-weight: 900; }
+
+  #glide { right: 16px; bottom: 16px; width: 312px; padding: 8px 12px; }
+  #glide .lbl { display: flex; justify-content: space-between; font-size: 16px; font-weight: 800; }
+  #glide .bar { height: 16px; margin-top: 5px; border: 2px solid var(--ink); border-radius: 999px; background: #fff; overflow: hidden; }
+  #glide .bar div { height: 100%; width: 62%; background: var(--signal-wind); border-right: 2px solid var(--ink); }
+
+  #donttag { left: 16px; top: 16px; width: 520px; padding: 8px 12px; font-size: 16px; line-height: 21px; }
+  #donttag b { font-size: 20px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script src="assets/courier.glb.js"></script>
+<script src="assets/windmill.glb.js"></script>
+</head>
+<body>
+<div id="controls"></div>
+
+<!-- text-heavy frame: the busiest screen at worst-case content -->
+<div class="ui" id="ui">
+  <div class="panel" id="quest">
+    <h2 class="display">Deliveries &middot; 5 of 5</h2>
+    <div class="row active"><div class="t">Crate of seed bulbs &rarr; Lantern Rock</div>
+      <div class="m">18 kg &middot; 2:40 left <span class="chip fragile">&#9670; Fragile</span><span class="chip storm">&#9660; Storm front</span></div></div>
+    <div class="row"><div class="t">Letters for the lighthouse keeper</div>
+      <div class="m">2 kg &middot; 6:15 left <span class="chip time">&#9679; On time</span></div></div>
+    <div class="row"><div class="t">Spare windmill sail, rolled</div>
+      <div class="m">11 kg &middot; 4:05 left <span class="chip wind">&#9650; Tailwind</span></div></div>
+    <div class="row"><div class="t">Jar of cloudberry jam &rarr; Low Shelf</div>
+      <div class="m">1 kg &middot; 9:30 left <span class="chip fragile">&#9670; Fragile</span><span class="chip time">&#9679; On time</span></div></div>
+    <div class="row"><div class="t">Sealed parcel, no return address</div>
+      <div class="m">7 kg &middot; 12:00 left <span class="chip storm">&#9660; Storm front</span></div></div>
+  </div>
+
+  <div class="panel" id="hud">
+    <div class="nums"><span>Altitude <b>412 m</b></span><span>Wind <b>14 km/h</b></span></div>
+    <div class="chips"><span class="chip wind">&#9650; Tailwind</span><span class="chip storm">&#9660; Storm front</span>
+      <span class="chip fragile">&#9670; Fragile</span><span class="chip time">&#9679; On time</span></div>
+  </div>
+
+  <div class="panel" id="inv">
+    <h2 class="display"><span>Satchel</span><span>11 / 12</span></h2>
+    <div class="grid">
+      <div class="slot sel"><i style="background:var(--cloud)"></i><span>&times;3</span></div>
+      <div class="slot"><i class="sq" style="background:var(--base-wood)"></i><span>&times;12</span></div>
+      <div class="slot"><i style="background:var(--base-roof)"></i><span>&times;99</span></div>
+      <div class="slot"><i class="sq" style="background:var(--base-cloth)"></i><span>&times;1</span></div>
+      <div class="slot"><i style="background:var(--base-grass)"></i><span>&times;24</span></div>
+      <div class="slot"><i class="sq" style="background:var(--base-rock)"></i><span>&times;7</span></div>
+      <div class="slot"><i style="background:var(--base-hair)"></i><span>&times;2</span></div>
+      <div class="slot"><i class="sq" style="background:var(--signal-fragile)"></i><span>&times;5</span></div>
+      <div class="slot"><i style="background:var(--signal-wind)"></i><span>&times;10</span></div>
+      <div class="slot"><i class="sq" style="background:var(--base-wood)"></i><span>&times;1</span></div>
+      <div class="slot"><i style="background:var(--signal-time)"></i><span>&times;64</span></div>
+      <div class="slot"></div>
+    </div>
+    <div class="tip"><b>Spare glider cloth</b>Patches one tear in flight. Heavy rain soaks it through.</div>
+  </div>
+
+  <div class="panel" id="dialogue">
+    <div class="name display">Dock keeper Maro</div>
+    <p>If the storm front reaches the eastern stacks before you do, the bulbs will freeze in their crate,
+      so take the high route past the old windmill, ride the tailwind through every ring, and don't let
+      anyone stack anything heavier than a letter on top of it.</p>
+    <div class="opts">
+      <span class="opt focus"><kbd>E</kbd> Take the high route</span>
+      <span class="opt"><kbd>Q</kbd> Ask about the storm</span>
+      <span class="opt"><kbd>Esc</kbd> Not now</span>
+    </div>
+  </div>
+
+  <div class="panel" id="glide">
+    <div class="lbl"><span>Glide</span><span>62 %</span></div>
+    <div class="bar"><div></div></div>
+  </div>
+</div>
+
+<div class="ui" id="dontui">
+  <div class="panel" id="donttag"><b>Don't</b><br>Smooth PBR shading, grey shadows, no outlines, six
+    bands on the courier, grey fog and filmic tone mapping: the same scene, no longer cel-shaded.</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------- Palettes: three instances of the same roles (all pass style.md's colour-rules) ----------
+const PALETTES = {
+  noon: {
+    ink: '#24203A', key: '#FFF3DA', 'shadow-tint': '#8FA0E8', 'sky-top': '#3A8EE6', 'sky-horizon': '#CFEFFF',
+    cloud: '#FFFFFF', 'base-grass': '#6CCB4A', 'base-rock': '#D09A62', 'base-wood': '#C27A42',
+    'base-roof': '#D9483B', 'base-cloth': '#2F72D6', 'base-skin': '#FFCFAA', 'base-hair': '#9B6BE0',
+    accent: '#FF3FA0', panel: '#FFF8EA',
+    'signal-wind': '#7FDBFF', 'signal-storm': '#FF8C66', 'signal-fragile': '#FFE066', 'signal-time': '#8EE07A',
+  },
+  dusk: {
+    ink: '#2B1838', key: '#FFEBD0', 'shadow-tint': '#9A8CE6', 'sky-top': '#5A4FB8', 'sky-horizon': '#FFD8BE',
+    cloud: '#FFF1E6', 'base-grass': '#8BC34A', 'base-rock': '#C7825A', 'base-wood': '#C98A4B',
+    'base-roof': '#3E7BD8', 'base-cloth': '#2E9C8E', 'base-skin': '#F7C29E', 'base-hair': '#B8473A',
+    accent: '#E040FB', panel: '#FFF4E6',
+    'signal-wind': '#7FD6F0', 'signal-storm': '#FF8A7A', 'signal-fragile': '#FFC2E2', 'signal-time': '#9BE38A',
+  },
+  mint: {
+    ink: '#16303A', key: '#FFF6E0', 'shadow-tint': '#86B4E8', 'sky-top': '#2FA8C9', 'sky-horizon': '#D9F7EC',
+    cloud: '#FFFFFF', 'base-grass': '#3FBF7A', 'base-rock': '#D9B25A', 'base-wood': '#C77E4A',
+    'base-roof': '#E0566E', 'base-cloth': '#8C70E8', 'base-skin': '#F2C7A5', 'base-hair': '#4F86E0',
+    accent: '#FF4FD8', panel: '#F4FFF8',
+    'signal-wind': '#8FE3FF', 'signal-storm': '#FF9C8C', 'signal-fragile': '#FFE27A', 'signal-time': '#B6F09A',
+  },
+};
+
+// ---------- Mode ----------
+const params = new URLSearchParams(location.search);
+const FRAMES = ['key-scene', 'character', 'prop', 'text-heavy', 'dont'];
+const FRAME = FRAMES.includes(params.get('frame')) ? params.get('frame') : null;
+const DONT = FRAME === 'dont';
+const FIXED_T = 1.25;                         // seconds; every frame is rendered at this time
+let palName = PALETTES[params.get('palette')] ? params.get('palette') : 'noon';
+if (FRAME) document.body.classList.add('frame');
+
+// ---------- Renderer ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = DONT ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = DONT ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 1000);
+
+// ---------- Lights (recipe ratios × π, since three.js lights are physical) ----------
+const ambient = new THREE.AmbientLight(0xffffff, (DONT ? 0.35 : 0.45) * Math.PI);
+const key = new THREE.DirectionalLight(0xffffff, (DONT ? 1.0 : 0.60 / 0.8) * Math.PI);
+const KEY_DIR = new THREE.Vector3(-8, 12, 6).normalize();
+key.position.copy(KEY_DIR).multiplyScalar(40);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 90 }); // ~1.2 cm texels
+key.shadow.normalBias = 0.1;                // ~8 texels: no acne along the band edge
+key.shadow.bias = -0.001;
+key.shadow.camera.updateProjectionMatrix();
+scene.add(ambient, key, key.target);
+// Distance fog toward the horizon colour: a depth cue, light enough that far islands stay shapes
+const FOG = [30, 210];
+scene.fog = new THREE.Fog(0xffffff, FOG[0], FOG[1]);
+
+// ---------- Ramp ----------
+function makeRamp(thresholds, values, size = 16) {
+  const data = new Uint8Array(size);
+  for (let i = 0; i < size; i++) {
+    const ndl = -1 + (i + 0.5) * (2 / size);
+    let band = 0;
+    thresholds.forEach((t) => { if (ndl >= t) band++; });
+    data[i] = Math.round(values[band] * 255);
+  }
+  const tex = new THREE.DataTexture(data, size, 1, THREE.RedFormat);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+const RAMP = makeRamp([0.0, 0.75], [0, 0.8, 1.0]);                                 // shade, lit, highlight
+const RAMP_FACE = makeRamp([-0.5, 0.75], [0, 0.8, 1.0]);                         // face: lit unless lit from behind
+const RAMP_TOO_MANY = makeRamp([-0.66, -0.33, 0, 0.33, 0.66], [0.05, 0.2, 0.4, 0.6, 0.8, 1.0], 32);
+
+// ---------- Materials, registered by palette role ----------
+const matReg = [];
+const matCache = new Map();
+const rimColor = { value: new THREE.Color() };
+function mat(role, { rim = false, unlit = false, face = false } = {}) {
+  const k = `${role}|${rim}|${unlit}|${face}`;
+  if (matCache.has(k)) return matCache.get(k);
+  let m;
+  if (unlit) m = new THREE.MeshBasicMaterial();
+  else if (DONT && rim) m = new THREE.MeshToonMaterial({ gradientMap: RAMP_TOO_MANY });
+  else if (DONT) m = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.05 });
+  else {
+    m = new THREE.MeshToonMaterial({ gradientMap: face ? RAMP_FACE : RAMP });
+    if (rim) {
+      m.onBeforeCompile = (s) => {
+        s.uniforms.rimColor = rimColor;
+        s.fragmentShader = 'uniform vec3 rimColor;\n' + s.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `#include <opaque_fragment>
+           float ndv = dot(normal, normalize(vViewPosition));
+           float lit = step(0.0, dot(normal, normalize((viewMatrix * vec4(${vec3(KEY_DIR)}, 0.0)).xyz)));
+           gl_FragColor.rgb = mix(gl_FragColor.rgb, rimColor, 0.35 * step(0.70, 1.0 - ndv) * lit);`);
+      };
+      m.customProgramCacheKey = () => 'rim';
+    }
+  }
+  matReg.push({ m, role });
+  matCache.set(k, m);
+  return m;
+}
+function vec3(v) { return `vec3(${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`; }
+
+// ---------- Inverted-hull outline: screen pixels, distance falloff, fades into fog ----------
+const OU = {
+  ink: { value: new THREE.Color() }, fogColor: { value: new THREE.Color() },
+  viewport: { value: new THREE.Vector2(1280, 720) },
+  fade: { value: new THREE.Vector2(12, 60) }, fogRange: { value: new THREE.Vector2(FOG[0], FOG[1]) },
+};
+const outlineCache = new Map();
+function outlineMat(widthPx) {
+  if (outlineCache.has(widthPx)) return outlineCache.get(widthPx);
+  const m = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: { ...OU, widthPx: { value: widthPx } },
+    vertexShader: `
+      attribute vec3 smoothNormal;
+      uniform float widthPx; uniform vec2 viewport, fade;
+      varying float vDepth;
+      void main() {
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec3 nView = normalize(normalMatrix * smoothNormal);
+        vec2 nClip = normalize((projectionMatrix * vec4(nView, 0.0)).xy + 1e-6);
+        float px = mix(widthPx, 1.0, smoothstep(fade.x, fade.y, clip.w)) * viewport.y / 1080.0;
+        clip.xy += nClip * px * 2.0 / viewport * clip.w;
+        vDepth = clip.w;
+        gl_Position = clip;
+      }`,
+    fragmentShader: `
+      uniform vec3 ink, fogColor; uniform vec2 fogRange; varying float vDepth;
+      void main() {
+        gl_FragColor = vec4(mix(ink, fogColor, smoothstep(fogRange.x, fogRange.y, vDepth)), 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
+  outlineCache.set(widthPx, m);
+  return m;
+}
+function addSmoothNormals(geo) {
+  if (geo.attributes.smoothNormal) return;
+  const p = geo.attributes.position, n = geo.attributes.normal, acc = new Map();
+  const kf = (i) => `${p.getX(i).toFixed(4)},${p.getY(i).toFixed(4)},${p.getZ(i).toFixed(4)}`;
+  for (let i = 0; i < p.count; i++) {
+    const k = kf(i), v = acc.get(k) || new THREE.Vector3();
+    acc.set(k, v.add(new THREE.Vector3(n.getX(i), n.getY(i), n.getZ(i))));
+  }
+  const out = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) acc.get(kf(i)).clone().normalize().toArray(out, i * 3);
+  geo.setAttribute('smoothNormal', new THREE.BufferAttribute(out, 3));
+}
+function outline(mesh, widthPx) {
+  if (DONT || !widthPx) return mesh;
+  addSmoothNormals(mesh.geometry);
+  mesh.add(new THREE.Mesh(mesh.geometry, outlineMat(widthPx)));
+  return mesh;
+}
+
+// ---------- Helpers ----------
+function hash(x, y, z) { const s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453; return s - Math.floor(s); }
+function part(geo, role, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], line = 2.5, rim = false, face = false,
+                           unlit = false, cast = true, receive = true } = {}) {
+  const m = new THREE.Mesh(geo, mat(role, { rim, unlit, face }));
+  m.position.set(...pos); m.rotation.set(...rot); m.scale.set(...scale);
+  m.castShadow = cast; m.receiveShadow = receive;
+  return outline(m, unlit ? 0 : line);
+}
+
+// ---------- World ----------
+const world = new THREE.Group();
+scene.add(world);
+
+function rockGeometry(seed) {
+  let g = new THREE.SphereGeometry(1, 28, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+  g.deleteAttribute('uv'); g.deleteAttribute('normal');
+  g = mergeVertices(g);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = hash(Math.round(x * 3), Math.round(y * 4), Math.round(z * 3) + seed);
+    const taper = 1 + y * 0.55;                          // narrower toward the bottom
+    const r = (0.86 + 0.22 * n) * taper;
+    p.setXYZ(i, x * r, y * (1.0 + 0.5 * hash(Math.round(x * 2), 7, Math.round(z * 2) + seed)), z * r);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+function tree(x, z, s = 1, y = 0.6) {
+  const g = new THREE.Group();
+  g.add(part(new THREE.CylinderGeometry(0.16, 0.24, 1.6, 7), 'base-wood', { pos: [0, 0.8, 0] }));
+  g.add(part(new THREE.SphereGeometry(0.95, 14, 10), 'base-grass', { pos: [0, 2.1, 0], scale: [1, 0.85, 1] }));
+  g.add(part(new THREE.SphereGeometry(0.65, 12, 8), 'base-grass', { pos: [0.45, 2.75, 0.1] }));
+  g.position.set(x, y, z); g.scale.setScalar(s);
+  return g;
+}
+function island(r, seed, { x = 0, y = 0, z = 0, depth = r * 0.9, line = 2 } = {}) {
+  const g = new THREE.Group();
+  g.add(part(new THREE.CylinderGeometry(r, r * 0.97, r * 0.13, 32, 1), 'base-grass', { line }));
+  g.add(part(rockGeometry(seed), 'base-rock', { pos: [0, -r * 0.06, 0], scale: [r * 0.98, depth, r * 0.98], line }));
+  g.position.set(x, y, z);
+  return g;
+}
+function crate(size = 0.7, tag = false) {
+  const g = new THREE.Group();
+  g.add(part(new THREE.BoxGeometry(size, size, size), 'base-wood', { pos: [0, size / 2, 0] }));
+  g.add(part(new THREE.BoxGeometry(size * 1.06, size * 0.12, size * 1.06), 'base-wood', { pos: [0, size * 0.94, 0] }));
+  g.add(part(new THREE.BoxGeometry(size * 1.03, size * 1.03, size * 0.14), 'base-cloth', { pos: [0, size / 2, 0], line: 2 }));
+  if (tag) {
+    g.add(part(new THREE.BoxGeometry(size * 0.34, size * 0.24, 0.03), 'accent',
+      { pos: [size * 0.2, size * 0.6, size * 0.53], rot: [0, 0, -0.18], line: 2 }));
+  }
+  return g;
+}
+
+// main island, top surface at y = 0.6
+const MAIN_TOP = 9 * 0.13 / 2;
+world.add(island(9, 1, { depth: 8 }));
+[[-5, 1, 1], [-7, 2.5, 1.2], [-4, -9, 0.9], [-3.5, 4.8, 0.8]].forEach(([x, z, s]) => world.add(tree(x, z, s, MAIN_TOP)));
+
+// grass tufts: small dressing, deliberately no outline
+for (let i = 0; i < 26; i++) {
+  const a = hash(i, 1, 2) * Math.PI * 2, d = 2 + hash(i, 3, 4) * 6;
+  world.add(part(new THREE.ConeGeometry(0.08, 0.32, 4), 'base-grass',
+    { pos: [Math.cos(a) * d, MAIN_TOP + 0.14, Math.sin(a) * d], rot: [0, a, 0.2], line: 0, cast: false }));
+}
+
+// ---------- Generated models (image-to-3D): texture flattened to palette-role slots ----------
+// Each model's texture holds a slot index per texel (R = slot × 16, nearest filter). The shader
+// looks the slot up in a palette uniform, so albedo stays flat and follows the palette switcher;
+// the toon ramp alone makes the bands. See assets/README.md.
+const roleMats = [];
+function roleMaterial(tex, slots, { rim = false, tooMany = false, faceSlot = -1 } = {}) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false; tex.needsUpdate = true;
+  let m;
+  if (DONT && tooMany) m = new THREE.MeshToonMaterial({ gradientMap: RAMP_TOO_MANY });
+  else if (DONT) m = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.05 });
+  else m = new THREE.MeshToonMaterial({ gradientMap: RAMP });
+  m.map = tex; m.side = THREE.DoubleSide;      // thin generated parts (sails, scarf) need both sides
+  const slotCol = { value: Array.from({ length: 16 }, () => new THREE.Color()) };
+  m.onBeforeCompile = (s) => {
+    s.uniforms.slotCol = slotCol; s.uniforms.rimColor = rimColor;
+    // face ramp: skin texels shift N·L by +0.5, so they stay lit unless lit from behind (recipe: Characters)
+    s.fragmentShader = 'uniform vec3 slotCol[16];\nuniform vec3 rimColor;\nfloat gFace = 0.0;\n' + s.fragmentShader
+      .replace('#include <gradientmap_pars_fragment>', THREE.ShaderChunk.gradientmap_pars_fragment
+        .replace('float dotNL = dot( normal, lightDirection );', 'float dotNL = dot( normal, lightDirection ) + gFace;'))
+      .replace('#include <map_fragment>',
+        `int slot = int(floor(texture2D(map, vMapUv).r * 15.9375 + 0.5));
+         diffuseColor.rgb *= slotCol[slot];
+         gFace = slot == ${faceSlot} ? 0.5 : 0.0;`);
+    if (rim && !DONT) s.fragmentShader = s.fragmentShader.replace('#include <opaque_fragment>',
+      `#include <opaque_fragment>
+       float ndv = dot(normal, normalize(vViewPosition));
+       float lit = step(0.0, dot(normal, normalize((viewMatrix * vec4(${vec3(KEY_DIR)}, 0.0)).xyz)));
+       gl_FragColor.rgb = mix(gl_FragColor.rgb, rimColor, 0.35 * step(0.70, 1.0 - ndv) * lit);`);
+  };
+  m.customProgramCacheKey = () => `role${rim}${faceSlot}`;
+  roleMats.push({ slotCol, slots });
+  return m;
+}
+const spinners = [];                           // generated parts that turn: { obj, axis }
+function placeModel(name, slots, { height, line, rim = false, tooMany = false, faceSlot = -1, receive = false }) {
+  return new Promise((resolve) => {
+    const bin = Uint8Array.from(atob(window.MODELS[name]), (c) => c.charCodeAt(0));
+    new GLTFLoader().parse(bin.buffer, '', (gltf) => {
+      const root = new THREE.Group();
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const geo = o.geometry;
+        addSmoothNormals(geo);                               // one smooth normal per position:
+        geo.setAttribute('normal', geo.attributes.smoothNormal.clone()); // no band patches at UV seams
+        const mesh = new THREE.Mesh(geo, roleMaterial(o.material.map, slots, { rim, tooMany, faceSlot }));
+        mesh.castShadow = true; mesh.receiveShadow = receive;
+        o.updateWorldMatrix(true, false); mesh.applyMatrix4(o.matrixWorld);
+        root.add(outline(mesh, line));
+        // a node with a spin axis (the windmill's sails, hub at the node origin) turns about it
+        if (o.userData.spinAxis) spinners.push({ obj: mesh, base: mesh.quaternion.clone(),
+                                                 axis: new THREE.Vector3(...o.userData.spinAxis).normalize() });
+      });
+      const box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3());
+      const s = height / size.y, c = box.getCenter(new THREE.Vector3());
+      root.scale.setScalar(s);
+      root.position.set(-c.x * s, -box.min.y * s, -c.z * s);  // feet on y = 0, centred
+      resolve(root);
+    });
+  });
+}
+// slot tables: [palette role, multiplier]; a multiplier < 1 is the material's one painted darker tone
+const COURIER_SLOTS = [['base-skin', 1], ['base-hair', 1], ['base-cloth', 1], ['base-cloth', 0.62], ['base-roof', 1],
+                       ['base-wood', 1], ['base-wood', 0.55], ['cloud', 1], ['ink', 1]];
+const WINDMILL_SLOTS = [['base-rock', 1], ['base-rock', 0.82], ['base-roof', 1], ['base-wood', 1], ['base-wood', 0.7],
+                        ['cloud', 1], ['cloud', 0.78]];
+
+// windmill
+const windmill = new THREE.Group();
+windmill.position.set(-2, MAIN_TOP, -5);
+windmill.rotation.y = 0.35;                  // tower and sails both read from the key-scene camera
+world.add(windmill);
+
+// crates
+const crates = [[4.6, -2.0, 0.7, 0.3, false], [4.6, -2.0, 0.6, -0.2, false, 0.7], [5.0, -0.9, 0.7, 0.5, true], [-0.6, -6.2, 0.6, 0.1, false]];
+crates.forEach(([x, z, s, ry, tag, lift = 0]) => {
+  const c = crate(s, tag); c.position.set(x, MAIN_TOP + lift, z); c.rotation.y = ry; world.add(c);
+});
+
+// route rings: the accent's one job is the route
+// rings float off the island's edge against open sky, leading to the far island with the house
+const ringsFrom = new THREE.Vector3(5, 5.5, -9), ringsTo = new THREE.Vector3(-9.5, 7.5, -45);
+const rings = [];
+for (let i = 0; i < 6; i++) {
+  const p = ringsFrom.clone().lerp(ringsTo, i / 5);
+  const r = part(new THREE.TorusGeometry(1.4, 0.16, 8, 32), 'accent', { pos: p.toArray(), line: 2.5, cast: false });
+  r.lookAt(ringsTo.clone().add(new THREE.Vector3(0, 0.5, -5)));
+  world.add(r); rings.push(r);
+}
+
+// far islands, a house on one
+const farA = island(7, 2, { x: -11.5, y: 3, z: -53, depth: 6 });
+farA.add(tree(-2.5, 1.5, 1.1, 0.45)); farA.add(tree(3, -2, 0.9, 0.45));
+const house = new THREE.Group();
+house.add(part(new THREE.BoxGeometry(2.2, 1.6, 1.8), 'base-rock', { pos: [0, 0.8, 0] }));
+house.add(part(new THREE.ConeGeometry(1.8, 1.3, 4), 'base-roof', { pos: [0, 2.2, 0], rot: [0, Math.PI / 4, 0] }));
+house.position.set(0.5, 0.45, 0.5); farA.add(house);
+world.add(farA);
+const farB = island(9, 3, { x: -15, y: 25, z: -94, depth: 8 }); farB.add(tree(2, 0, 1.6, 0.6)); world.add(farB);
+const farC = island(10, 4, { x: -11.5, y: -12, z: -125, depth: 9 }); farC.add(tree(-3, 2, 2, 0.65)); world.add(farC);
+world.add(island(6, 5, { x: -64, y: -4, z: -127, depth: 5 }));
+
+// clouds: two bands, no outline
+const cloudGeo = new THREE.SphereGeometry(1, 14, 10);
+function cloud(x, y, z, s) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const r = 0.6 + hash(i, s, x) * 0.6;
+    g.add(part(cloudGeo, 'cloud', { pos: [(i - 2.5) * 0.9, hash(i, 2, s) * 0.5, hash(s, i, 3) * 0.8 - 0.4],
+      scale: [r * 1.3, r * 0.75, r], line: 0, cast: false, receive: false }));
+  }
+  g.position.set(x, y, z); g.scale.setScalar(s);
+  return g;
+}
+[[6, -11, -14, 2.5], [2, -10, -26, 3], [-22, -15, -30, 3], [22, -3, -62, 3.5], [-35, 1, -110, 5], [42, -14, -92, 4],
+ [-10, 14, -150, 6], [-30, -8, 6, 3], [30, 8, -150, 6]].forEach((c) => world.add(cloud(...c)));
+// more clouds at three depths, placed by bearing from the key-scene camera: [degrees right of view,
+// degrees above level, distance, size]. The fog pales the far ones toward the horizon colour.
+const KEY_EYE = new THREE.Vector3(11, 3.6, 3), KEY_FWD = Math.atan2(-13, -13);
+[[-30, 9, 55, 2.2], [7, 11, 110, 3], [-37, 3, 180, 9], [26, 4, 190, 8],
+ [14, -14, 120, 6], [-22, -9, 75, 3.5], [38, -20, 70, 4]].forEach(([a, e, d, s]) => {
+  const h = KEY_FWD + THREE.MathUtils.degToRad(a), el = THREE.MathUtils.degToRad(e);
+  const p = KEY_EYE.clone().add(new THREE.Vector3(Math.cos(h) * Math.cos(el), Math.sin(el), Math.sin(h) * Math.cos(el)).multiplyScalar(d));
+  world.add(cloud(p.x, p.y, p.z, s));
+});
+
+// ---------- Courier: generated model (front faces +z; feet at y = 0; 1.75 m tall) ----------
+const courier = new THREE.Group();
+courier.position.set(6, MAIN_TOP, -3);       // near the island's edge, the drop behind
+courier.rotation.y = 0.25;
+scene.add(courier);
+const modelsReady = Promise.all([
+  placeModel('courier', COURIER_SLOTS, { height: 1.75, line: 3, rim: true, tooMany: true, faceSlot: 0 }).then((m) => courier.add(m)),
+  placeModel('windmill', WINDMILL_SLOTS, { height: 6.4, line: 2.5 }).then((m) => windmill.add(m)),
+]);
+
+// ---------- Prop frame object: one delivery crate ----------
+const prop = crate(0.8, true);
+scene.add(prop);
+
+// ---------- Sky: banded gradient (four flat steps up to sky-top), hard sun disc with one ring ----------
+// The bands sit low (horizon to ~20 degrees up), where a level game camera actually sees sky; below
+// the horizon two steps deepen toward sky-top again, so the drop under the islands reads as depth.
+const skyU = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() },
+               sun: { value: new THREE.Color() }, sunDir: { value: KEY_DIR.clone() } };
+const sky = new THREE.Mesh(new THREE.SphereGeometry(500, 48, 24), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyU,
+  vertexShader: `varying vec3 vDir;
+    void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform vec3 top, horizon, sun, sunDir; varying vec3 vDir;
+    void main(){
+      vec3 d = normalize(vDir);
+      float up = floor(clamp(d.y / 0.34, 0.0, 1.0) * 4.0) / 4.0;            // 0, .25, .5, .75, 1
+      float down = floor(clamp(-d.y / 0.5, 0.0, 1.0) * 3.0) / 3.0 * 0.35;  // 0, .12, .23, .35
+      vec3 c = mix(horizon, top, max(up, down));
+      float a = dot(d, normalize(sunDir));
+      c = mix(c, sun, step(cos(radians(1.5)), a));
+      c = mix(c, sun, 0.3 * step(cos(radians(2.6)), a) * (1.0 - step(cos(radians(2.4)), a)));
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+    }`,
+}));
+sky.renderOrder = -1;
+scene.add(sky);
+
+// ---------- Palette ----------
+function applyPalette(name) {
+  palName = name;
+  const P = PALETTES[name];
+  for (const { m, role } of matReg) m.color.set(P[role]);
+  for (const { slotCol, slots } of roleMats) slots.forEach(([role, k], i) => slotCol.value[i].set(P[role]).multiplyScalar(k));
+  rimColor.value.set(P['sky-horizon']);
+  OU.ink.value.set(P.ink); OU.fogColor.value.set(P['sky-horizon']);
+  ambient.color.set(DONT ? '#808080' : P['shadow-tint']);
+  key.color.set(DONT ? '#ffffff' : P.key);
+  scene.fog.color.set(DONT ? '#b8b8b8' : P['sky-horizon']);
+  skyU.top.value.set(P['sky-top']); skyU.horizon.value.set(P['sky-horizon']); skyU.sun.value.set(P.key);
+  if (scene.background) scene.background.set(P['sky-horizon']);
+  for (const [k, v] of Object.entries(P)) document.documentElement.style.setProperty(`--${k}`, v);
+  document.body.style.background = P['sky-horizon'];
+  document.querySelectorAll('[data-pal]').forEach((b) => b.classList.toggle('on', b.dataset.pal === name));
+  dirty = true;
+}
+
+// ---------- Frames ----------
+const ui = document.getElementById('ui'), dontui = document.getElementById('dontui');
+let controls = null;
+function setupFrame(name) {
+  const isolated = name === 'character' || name === 'prop';
+  world.visible = sky.visible = !isolated;
+  courier.visible = name !== 'prop';
+  prop.visible = name === 'prop';
+  scene.background = isolated ? new THREE.Color(PALETTES[palName]['sky-horizon']) : null;
+  ui.classList.toggle('show', name === 'text-heavy');
+  dontui.classList.toggle('show', name === 'dont');
+  const target = new THREE.Vector3();
+  if (name === 'character') {
+    const a = courier.rotation.y + 0.55;
+    camera.fov = 35;
+    target.set(courier.position.x, courier.position.y + 0.9, courier.position.z);
+    camera.position.set(target.x + Math.sin(a) * 3.9, target.y + 0.35, target.z + Math.cos(a) * 3.9);
+  } else if (name === 'prop') {
+    camera.fov = 35;
+    target.set(0, 0.42, 0);
+    camera.position.set(1.3, 1.3, 1.9);
+  } else {
+    camera.fov = 50;                         // outside the island, so its edge and the drop show
+    target.set(-2, 0.6, -10);
+    camera.position.set(11, 3.6, 3);
+  }
+  camera.updateProjectionMatrix();
+  camera.lookAt(target);
+  if (controls) { controls.target.copy(target); controls.update(); }
+  dirty = true;
+}
+
+// ---------- Animation (deterministic in t) ----------
+const courierBaseY = courier.position.y;
+function update(t) {
+  courier.position.y = courierBaseY + 0.04 * Math.sin(t * Math.PI);   // idle bob; the model itself is static
+  rings.forEach((r, i) => { r.position.y = ringsFrom.y + (ringsTo.y - ringsFrom.y) * i / 5 + 0.15 * Math.sin(t * 2 + i); });
+  sky.position.copy(camera.position);
+  const turn = FRAME ? 0 : -0.2 * 2 * Math.PI * t;   // 0.2 turns/s (recipe: Motion); frames keep them still
+  for (const sp of spinners) sp.obj.quaternion.copy(sp.base).multiply(new THREE.Quaternion().setFromAxisAngle(sp.axis, turn));
+}
+
+// ---------- Size ----------
+function resize() {
+  const w = FRAME ? 1280 : window.innerWidth, h = FRAME ? 720 : window.innerHeight;
+  renderer.setPixelRatio(FRAME ? 1 : Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(w, h, !FRAME);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.getDrawingBufferSize(OU.viewport.value);
+  dirty = true;
+}
+
+// ---------- Loop ----------
+let dirty = true;
+applyPalette(palName);
+resize();
+
+if (FRAME) modelsReady.then(() => {
+  applyPalette(palName);
+  setupFrame(FRAME);
+  let n = 0;
+  const step = () => {
+    update(FIXED_T);
+    renderer.render(scene, camera);
+    if (++n < 10) setTimeout(step, 30);
+    else document.title = 'ready';
+  };
+  step();
+}); else {
+  modelsReady.then(() => applyPalette(palName));
+  controls = new OrbitControls(camera, renderer.domElement);
+  setupFrame('key-scene');
+  let lastInput = -1e9, last = 0, running = true;
+  const poke = () => { lastInput = performance.now(); };
+  controls.addEventListener('change', poke);
+  renderer.domElement.addEventListener('pointerdown', poke);
+  window.addEventListener('resize', () => { resize(); poke(); });
+
+  const bar = document.getElementById('controls');
+  const btn = (label, fn, data) => {
+    const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); poke(); };
+    if (data) b.dataset.pal = data; bar.appendChild(b); return b;
+  };
+  Object.keys(PALETTES).forEach((p) => btn(p, () => applyPalette(p), p));
+  bar.appendChild(Object.assign(document.createElement('span'), { className: 'sep' }));
+  ['key-scene', 'character', 'prop', 'text-heavy'].forEach((f) => btn(f, () => setupFrame(f)));
+  const a = document.createElement('a'); a.textContent = "don't"; a.href = '?frame=dont'; bar.appendChild(a);
+  applyPalette(palName);
+
+  const tick = (now) => {
+    if (document.hidden) { running = false; return; }
+    const active = now - lastInput < 1500;
+    if (active || now - last >= 100 || dirty) {     // full rate while interacting, ~10 fps when idle
+      last = now; dirty = false;
+      update(now / 1000);
+      renderer.render(scene, camera);
+    }
+    requestAnimationFrame(tick);
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !running) { running = true; requestAnimationFrame(tick); }
+  });
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>

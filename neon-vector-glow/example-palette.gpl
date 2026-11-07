@@ -1,0 +1,24 @@
+GIMP Palette
+Name: neon-vector-glow - example
+Columns: 4
+# One instance of the colour structure in style.md. Never ship it as is: every game re-chooses
+# each role for its own tone. Checked against style.md's colour-rules (value = HSV V,
+# chroma = S x V, contrast = WCAG ratio, hue distance in degrees on the HSV wheel):
+#   value(void) 0.047 (<= 0.06); value(grid) 0.32, chroma(grid) 0.23 (<= 0.35, <= 0.25)
+#   gameplay roles: chroma >= 0.64, value 1.00; contrast on void >= 5.2, on grid >= 3.7
+#   player on void 14.5:1; hud-ink on hud-panel 16.4:1, on void 17.4:1; chroma(hud-ink) 0.10
+#   hue gaps: enemies/danger to player and core >= 78; enemy pairs >= 49;
+#   danger to enemies and pickup >= 33; pickup to enemies >= 36; core to player 36
+# Silhouettes (not checkable here): player dart, seeker open triangle, splitter three rings,
+# warden facing brackets, danger filled dot with a void rim, pickups ring / crossed ring / open arc.
+  5   6  12	void           #05060C
+ 23  38  82	grid           #172652
+ 51 240 255	player         #33F0FF
+ 92 255 168	core           #5CFFA8
+240 255  61	pickup         #F0FF3D
+255  43  58	danger         #FF2B3A
+255  61 216	enemy-seeker   #FF3DD8
+255 138  31	enemy-splitter #FF8A1F
+154  92 255	enemy-warden   #9A5CFF
+230 238 255	hud-ink        #E6EEFF
+ 10  15  30	hud-panel      #0A0F1E

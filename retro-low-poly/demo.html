@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retro low-poly demo</title>
+<style>
+  :root { --ink:#1C1824; --panel:#F4ECD8; --accent:#A23CFF; --fog:#DDEEF5;
+          --signal-ok:#86D890; --signal-warn:#F2C24E; --signal-danger:#F27060; --signal-info:#86B8F2; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--fog); }
+  body { font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color:var(--ink); }
+  canvas#c { display:block; position:absolute; left:0; top:0; image-rendering:pixelated; }
+  /* frame mode: a fixed 1280x720 canvas pinned at the top-left, whatever the viewport */
+  body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
+
+  /* demo controls (hidden in frame mode) */
+  #controls { position:absolute; right:12px; bottom:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; z-index:5; max-width:calc(100% - 24px); }
+  #controls label, #controls button, #controls select {
+    font:inherit; font-weight:700; font-size:15px; color:var(--ink); background:var(--panel);
+    border:2px solid var(--ink); border-radius:4px; padding:5px 9px; box-shadow:3px 3px 0 var(--ink); cursor:pointer;
+  }
+  #controls button[aria-pressed="true"] { outline:3px solid var(--accent); outline-offset:-5px; }
+  body.frame #controls { display:none; }
+  #help { position:absolute; left:12px; bottom:12px; font-size:14px; font-weight:700; background:var(--panel); border:2px solid var(--ink);
+          padding:4px 8px; border-radius:4px; z-index:5; }
+  body.frame #help { display:none; }
+
+  /* the interface: live text at full resolution, never inside the low-res image.
+     A 1280x720 box; scaled to fit outside frame mode. */
+  #hud { position:absolute; left:0; top:0; width:1280px; height:720px; transform-origin:0 0; pointer-events:none; display:none; }
+  body.frame #hud { position:fixed; }
+  #hud.on { display:block; }
+  .panel { position:absolute; background:var(--panel); border:2px solid var(--ink); border-radius:4px; box-shadow:3px 3px 0 var(--ink); box-sizing:border-box; }
+  .status { left:16px; top:14px; display:flex; gap:18px; padding:8px 14px; font-size:18px; font-weight:700; }
+  .status b { font-weight:800; }
+  .chips { position:absolute; right:16px; top:14px; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:16px; line-height:1.15; padding:3px 10px 3px 4px;
+          border:2px solid var(--ink); border-radius:4px; color:var(--ink); white-space:nowrap; }
+  .chip i { font-style:normal; display:inline-grid; place-items:center; width:20px; height:20px; border-radius:3px; background:var(--ink); color:var(--panel); font-size:13px; }
+  .ok { background:var(--signal-ok); } .warn { background:var(--signal-warn); }
+  .danger { background:var(--signal-danger); } .info { background:var(--signal-info); }
+  .tickets { right:16px; top:160px; width:380px; padding:9px 12px; display:flex; flex-direction:column; gap:5px; }  /* height follows content: nothing clipped */
+  .tickets h3 { margin:0; font-size:18px; font-weight:800; }
+  .t { border-top:2px solid var(--ink); padding-top:4px; }
+  .t p { margin:0; font-size:16px; font-weight:700; line-height:1.2; overflow-wrap:anywhere; }
+  .t p.who { font-weight:800; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .t .chip { font-size:14px; padding:1px 7px 1px 3px; }
+  .t .chip i { width:16px; height:16px; font-size:11px; }
+  .dialogue { left:16px; bottom:16px; width:852px; padding:22px 18px 12px; }
+  .who-label { position:absolute; left:14px; top:-15px; background:var(--ink); color:var(--panel); font-size:16px; font-weight:800;
+               letter-spacing:.08em; padding:3px 10px; border-radius:3px; }
+  .dialogue p { margin:0 0 10px; font-size:20px; font-weight:700; line-height:1.3; }
+  .dialogue ol { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:5px; }
+  .dialogue li { font-size:18px; font-weight:700; line-height:1.25; display:flex; gap:10px; align-items:baseline; }
+  .dialogue li kbd { font:inherit; font-weight:800; flex:none; display:inline-grid; place-items:center; min-width:22px; height:22px; border:2px solid var(--ink); border-radius:3px; font-size:15px; }
+  .dialogue li.sel { outline:3px solid var(--accent); outline-offset:2px; border-radius:2px; }
+  .prompt { position:absolute; display:none; transform:translate(-50%, -100%); background:var(--panel); border:3px solid var(--accent); border-radius:4px;
+            padding:4px 10px; font-size:17px; font-weight:800; white-space:nowrap; box-shadow:3px 3px 0 var(--ink); }
+  .prompt kbd { font:inherit; border:2px solid var(--ink); border-radius:3px; padding:0 5px; margin-right:6px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="help">Drag or arrow keys to look</div>
+<div id="controls">
+  <label>Lighting <select id="pal"></select></label>
+  <button id="vFp" aria-pressed="true">First person</button>
+  <button id="vCook" aria-pressed="false">Cook</button>
+  <button id="vJuke" aria-pressed="false">Jukebox</button>
+  <button id="bHud" aria-pressed="false">Busiest screen</button>
+  <button id="bBroken" aria-pressed="false">Broken look</button>
+</div>
+
+<div id="hud">
+  <div class="panel status"><span><b>Fri 11:48 PM</b></span><span>Shift 3 of 5</span><span>Tips <b>$143.75</b></span><span>Coffee 14 / 20 cups</span></div>
+  <div class="chips">
+    <span class="chip ok"><i>✓</i>Fresh pot brewed</span>
+    <span class="chip warn"><i>!</i>Booth 4 waiting 6 min</span>
+    <span class="chip danger"><i>×</i>Grill too hot: 2 orders at risk</span>
+    <span class="chip info"><i>i</i>Jukebox: 2 songs queued</span>
+  </div>
+  <div class="panel tickets">
+    <h3>Open orders (6)</h3>
+    <div class="t"><p class="who">Booth 4 · 3 guests <span class="chip warn"><i>!</i>Waiting</span></p><p>Double cheeseburger, onion rings, chocolate malt, side salad with blue-cheese dressing</p></div>
+    <div class="t"><p class="who">Counter 2 <span class="chip danger"><i>×</i>Burning</span></p><p>Short stack, two eggs over easy, extra-crispy hash browns</p></div>
+    <div class="t"><p class="who">Booth 1 · 2 guests <span class="chip ok"><i>✓</i>Ready</span></p><p>Grilled cheese, tomato soup, cherry pie à la mode</p></div>
+    <div class="t"><p class="who">Counter 6 <span class="chip info"><i>i</i>Takeout</span></p><p>Club sandwich, no mayo, pickle on the side</p></div>
+    <div class="t"><p class="who">Booth 3 · 4 guests <span class="chip warn"><i>!</i>Allergy</span></p><p>Fish fry (no nuts in the batter), coleslaw, lemonade ×3</p></div>
+    <div class="t"><p class="who">Counter 1 <span class="chip ok"><i>✓</i>Paid</span></p><p>Coffee, refill</p></div>
+  </div>
+  <div class="panel dialogue">
+    <span class="who-label">COOK</span>
+    <p>“Booth four's been waiting since the rush, the grill's running hot, and somebody keeps playing that same song on the jukebox. Pick one thing for me to sort out first, and make it quick.”</p>
+    <ol>
+      <li class="sel"><kbd>1</kbd>Take booth four their drinks and tell them the burgers are two minutes out.</li>
+      <li><kbd>2</kbd>Turn the grill down, even if the burning order has to start over.</li>
+      <li><kbd>3</kbd>Unplug the jukebox.</li>
+    </ol>
+  </div>
+  <div class="prompt" id="prompt"><kbd>E</kbd>Pick a song · 2 queued</div>
+</div>
+
+<!-- Palettes and lighting: every one fills the same roles and passes style.md's colour-rules.
+     The materials are the same in both: only the light, fog, sky and glow change the mood. -->
+<script type="application/json" id="palettes">
+{
+ "afternoon": {"label":"Sunny afternoon",
+  "ink":"#1C1824","panel":"#F4ECD8","key":"#FFF2D8","ambient":"#8A94A8","fog":"#DDEEF5","sky":"#7FB8E0",
+  "glow-sign":"#FF5A50","glow-jukebox":"#FFC850","glow-tube":"#F0FAFF","accent":"#A23CFF",
+  "signal-ok":"#86D890","signal-warn":"#F2C24E","signal-danger":"#F27060","signal-info":"#86B8F2",
+  "material-floor-light":"#E0CCA0","material-floor-dark":"#2A2A30","material-wall":"#8FCFBF","material-wood":"#7A4E2E",
+  "material-vinyl":"#B02A34","material-chrome":"#C4CCD6","material-formica":"#E2CA7A","material-skin":"#C68462",
+  "material-cloth":"#F2F0EA","material-paint":"#3A86B8","material-brick":"#9A5A48","material-asphalt":"#4E5058",
+  "light": {"amb":0.75, "sun":0.62, "sunDir":[0.4,0.8,0.45], "tubes":0.12, "sign":0.35, "juke":0.55, "head":0.1, "kitchen":0.25,
+            "fogNear":6, "fogFar":55, "stars":0}},
+ "night": {"label":"Late night, neon and fluorescent",
+  "ink":"#16121E","panel":"#E8E2F0","key":"#E4F4FF","ambient":"#262A40","fog":"#0B0E1A","sky":"#161C34",
+  "glow-sign":"#FF3CA8","glow-jukebox":"#FFB040","glow-tube":"#E4F4FF","accent":"#A23CFF",
+  "signal-ok":"#86D890","signal-warn":"#F2C24E","signal-danger":"#F27060","signal-info":"#86B8F2",
+  "material-floor-light":"#E0CCA0","material-floor-dark":"#2A2A30","material-wall":"#8FCFBF","material-wood":"#7A4E2E",
+  "material-vinyl":"#B02A34","material-chrome":"#C4CCD6","material-formica":"#E2CA7A","material-skin":"#C68462",
+  "material-cloth":"#F2F0EA","material-paint":"#3A86B8","material-brick":"#9A5A48","material-asphalt":"#4E5058",
+  "light": {"amb":1.0, "sun":0.0, "sunDir":[0.4,0.8,0.45], "tubes":1.0, "sign":1.0, "juke":0.9, "head":1.0, "kitchen":0.8,
+            "fogNear":3, "fogFar":26, "stars":1}}
+}
+</script>
+
+<script src="assets/textures.js"></script>
+<script src="assets/cook.glb.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------- assets: MaterialCraft textures (data URIs) and the Meshy cook (base64 GLB), see assets/README.md ----------
+const IMG = {};
+await Promise.all(Object.entries(window.TEXTURES).map(([k, src]) => new Promise((ok, bad) => {
+  const im = new Image(); im.onload = () => { IMG[k] = im; ok(); }; im.onerror = bad; im.src = src; })));
+const glbBytes = Uint8Array.from(atob(window.MODELS.cook), c => c.charCodeAt(0)).buffer;
+const COOK = await new Promise((ok, bad) => new GLTFLoader().parse(glbBytes, '', ok, bad));
+
+// ---------- setup ----------
+const params = new URLSearchParams(location.search);
+const FRAME = params.get('frame');                 // key-scene | character | prop | text-heavy | dont
+const PALETTES = JSON.parse(document.getElementById('palettes').textContent);
+let palName = PALETTES[params.get('palette')] ? params.get('palette') : 'afternoon';
+const P = () => PALETTES[palName];
+if (FRAME) document.body.classList.add('frame');
+let broken = FRAME === 'dont';
+let needRender = true, activeUntil = 0, last = 0, running = false;
+
+THREE.ColorManagement.enabled = false;             // hexes are used as authored: gamma-space lighting, like the era
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+
+const LINES = 240;                                 // internal render height
+const W = () => FRAME ? 1280 : innerWidth, H = () => FRAME ? 720 : innerHeight;
+const lowW = () => Math.round(LINES * W() / H());
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = s => [...s].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261);
+
+// ---------- one shader for every mesh: per-vertex light, vertex snap, affine UVs, linear fog ----------
+const G = {
+  uRes: { value: new THREE.Vector2(427, 240) }, uSnap: { value: 1 }, uAffine: { value: 1 }, uPerPixel: { value: 0 },
+  uAmb: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() },
+  uPtPos: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) },
+  uPtCol: { value: Array.from({ length: 6 }, () => new THREE.Color(0, 0, 0)) },
+  uPtK: { value: [1, 1, 1, 1, 1, 1] },
+  uFogCol: { value: new THREE.Color() }, uFogNear: { value: 6 }, uFogFar: { value: 55 },
+  uAccent: { value: new THREE.Color() },
+};
+const EMIT = { none: { value: 0 }, tube: { value: 0 }, sign: { value: 0 }, juke: { value: 0 }, head: { value: 0 } };
+const HI = { none: { value: 0 }, juke: { value: 0 } };
+
+const LIGHT = /* glsl */`
+uniform vec3 uAmb; uniform vec3 uSunDir; uniform vec3 uSunCol;
+uniform vec3 uPtPos[6]; uniform vec3 uPtCol[6]; uniform float uPtK[6];
+vec3 lightAt(vec3 P, vec3 N) {
+  vec3 c = uAmb + uSunCol * max(dot(N, uSunDir), 0.0);
+  for (int i = 0; i < 6; i++) {
+    vec3 L = uPtPos[i] - P; float d = length(L);
+    float wrap = max(dot(N, L / max(d, 1e-4)), 0.0) * 0.8 + 0.2;     // wrap-Lambert: back faces keep 20%
+    c += uPtCol[i] * wrap / (1.0 + uPtK[i] * d * d);
+  }
+  return c;
+}`;
+const VS = LIGHT + /* glsl */`
+uniform vec2 uRes; uniform float uSnap; uniform float uAffine; uniform float uFogNear; uniform float uFogFar;
+varying vec3 vAff; varying vec3 vLight; varying float vFog; varying vec3 vWP; varying vec3 vWN;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vec3 wn = normalize(mat3(modelMatrix) * normal);
+  vec4 vp = viewMatrix * wp;
+  vec4 p = projectionMatrix * vp;
+  if (uSnap > 0.0) {                                   // snap to the low-res pixel grid
+    vec2 grid = uRes * 0.5 / uSnap;
+    p.xy = floor(p.xy / p.w * grid + 0.5) / grid * p.w;
+  }
+  gl_Position = p;
+  float w = mix(1.0, p.w, uAffine);                    // affine: uv*w here, divided back per fragment
+  vAff = vec3(uv * w, w);
+  vLight = lightAt(wp.xyz, wn);                        // Gouraud: light per vertex
+  vFog = clamp((-vp.z - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+  vWP = wp.xyz; vWN = wn;
+}`;
+const FS = LIGHT + /* glsl */`
+uniform sampler2D map; uniform float uEmit; uniform float uUnlit; uniform float uFogOn; uniform float uHi; uniform float uPerPixel;
+uniform vec3 uFogCol; uniform vec3 uAccent;
+varying vec3 vAff; varying vec3 vLight; varying float vFog; varying vec3 vWP; varying vec3 vWN;
+void main() {
+  vec2 uv = vAff.xy / vAff.z;
+  vec3 tex = texture2D(map, uv).rgb;
+  vec3 L = uPerPixel > 0.5 ? lightAt(vWP, normalize(vWN)) : vLight;
+  L = mix(L, vec3(1.0), uUnlit);
+  float bright = smoothstep(0.55, 0.85, max(tex.r, max(tex.g, tex.b)));   // only bright texels glow
+  vec3 c = tex * L + tex * uEmit * bright + uAccent * uHi;
+  c = mix(c, uFogCol, vFog * uFogOn);
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+// ---------- textures, drawn in code at 32-64 px from the palette roles ----------
+const TEX = {};
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const css = a => `rgb(${a.map(v => Math.max(0, Math.min(255, Math.round(v)))).join(',')})`;
+const R = role => rgb(P()[role]);
+const shade = (role, k) => css(R(role).map(v => v * k));
+const mixc = (ra, rb, t) => { const a = R(ra), b = R(rb); return css(a.map((v, i) => v + (b[i] - v) * t)); };
+function speck(x, w, h, rnd, n, fill, s = 1) { x.fillStyle = fill; for (let i = 0; i < n; i++) x.fillRect(Math.floor(rnd() * w), Math.floor(rnd() * h), s, s); }
+
+// world signs: a 5x7 bitmap font drawn texel by texel (canvas text antialiases and breaks under 5-bit quantisation)
+const GLYPHS = { O: '01110100011000110001100011000101110', P: '11110100011000111110100001000010000',
+  E: '11111100001000011110100001000011111', N: '10001110011010110011100011000110001',
+  A: '01110100011000111111100011000110001', T: '11111001000010000100001000010000100' };
+function pixelText(x, text, s, w, h) {          // s = texels per glyph pixel; 1 glyph pixel of space between letters
+  const tw = text.length * 6 * s - s, x0 = Math.round((w - tw) / 2), y0 = Math.round((h - 7 * s) / 2);
+  [...text].forEach((ch, k) => { const g = GLYPHS[ch];
+    for (let i = 0; i < 35; i++) if (g[i] === '1') x.fillRect(x0 + (k * 6 + i % 5) * s, y0 + Math.floor(i / 5) * s, s, s); });
+}
+const DRAW = {
+  floor: [64, 64, x => x.drawImage(IMG.floor, 0, 0)],          // MaterialCraft: assets/floor.png
+  wall: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-wall', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-wall', 0.8); x.fillRect(0, 0, 1, h); x.fillRect(16, 0, 1, h);
+    x.fillStyle = shade('material-wall', 1.1); x.fillRect(1, 0, 1, h); x.fillRect(17, 0, 1, h);
+    speck(x, w, h, r, 30, shade('material-wall', 0.9)); }],
+  tile: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-cloth', 0.95); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-chrome', 0.7); for (let i = 0; i < 32; i += 8) { x.fillRect(i, 0, 1, h); x.fillRect(0, i, w, 1); }
+    speck(x, w, h, r, 16, shade('material-cloth', 0.85)); }],
+  ceiling: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-cloth', 0.86); x.fillRect(0, 0, w, h);
+    speck(x, w, h, r, 90, shade('material-cloth', 0.7)); x.fillStyle = shade('material-chrome', 0.8); x.fillRect(0, 0, w, 1); x.fillRect(0, 0, 1, h); }],
+  wood: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-wood', 1); x.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y++) if (r() < 0.45) { x.fillStyle = shade('material-wood', r() < 0.5 ? 0.82 : 1.15); x.fillRect(0, y, w, 1); }
+    x.fillStyle = shade('material-wood', 0.6); for (let i = 0; i < 32; i += 8) x.fillRect(i, 0, 1, h); }],
+  vinyl: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-vinyl', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-vinyl', 0.72);
+    for (let i = -32; i < 32; i += 8) for (let k = 0; k < 32; k++) { x.fillRect(i + k, k, 1, 1); x.fillRect(i + 32 - k, k, 1, 1); }
+    x.fillStyle = shade('material-vinyl', 1.25); for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) x.fillRect(i * 8 + 4, j * 8, 2, 2); }],
+  chrome: [32, 32, (x, w, h) => { const k = [0.62, 0.8, 1.0, 1.12, 1.18, 1.05, 0.85, 0.7];
+    for (let y = 0; y < h; y++) { x.fillStyle = shade('material-chrome', k[Math.floor(y / 2) % 8]); x.fillRect(0, y, w, 1); } }],
+  formica: [64, 64, x => x.drawImage(IMG.formica, 0, 0)],      // MaterialCraft: assets/formica.png
+  brick: [64, 64, x => x.drawImage(IMG.brick, 0, 0)],          // MaterialCraft: assets/brick.png
+  asphalt: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-asphalt', 1); x.fillRect(0, 0, w, h);
+    speck(x, w, h, r, 110, shade('material-asphalt', 0.75)); speck(x, w, h, r, 70, shade('material-asphalt', 1.35)); }],
+  road: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-asphalt', 0.85); x.fillRect(0, 0, w, h);
+    speck(x, w, h, r, 90, shade('material-asphalt', 0.65)); x.fillStyle = shade('material-formica', 1); x.fillRect(0, 15, 18, 2); }],
+  paint: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-paint', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-paint', 1.25); x.fillRect(0, 0, w, 5);
+    x.fillStyle = shade('material-chrome', 1.05); x.fillRect(0, 14, w, 2); speck(x, w, h, r, 12, shade('material-paint', 0.85)); }],
+  glass: [32, 32, (x, w, h) => { x.fillStyle = mixc('material-floor-dark', 'sky', 0.35); x.fillRect(0, 0, w, h);
+    x.fillStyle = mixc('material-floor-dark', 'sky', 0.8); for (let k = 0; k < 32; k++) x.fillRect(k, 31 - k, 3, 1); }],
+  dark: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-floor-dark', 1); x.fillRect(0, 0, w, h); speck(x, w, h, r, 40, shade('material-floor-dark', 1.5)); }],
+  skin: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-skin', 1); x.fillRect(0, 0, w, h); speck(x, w, h, r, 20, shade('material-skin', 0.9)); }],
+  cloth: [32, 32, (x, w, h, r) => { x.fillStyle = shade('material-cloth', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-cloth', 0.86); for (let i = 3; i < 32; i += 7) x.fillRect(i, 0, 1, h); speck(x, w, h, r, 20, shade('material-cloth', 0.9)); }],
+  jukefront: [64, 64, (x, w, h, r) => { x.fillStyle = shade('material-wood', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('glow-jukebox', 1); x.fillRect(8, 4, 48, 26);                              // lit window
+    x.fillStyle = shade('material-cloth', 1); for (let i = 0; i < 4; i++) x.fillRect(12, 8 + i * 5, 40, 3);   // song cards
+    x.fillStyle = shade('material-floor-dark', 1); for (let i = 0; i < 4; i++) for (let k = 0; k < 5; k++) x.fillRect(14 + k * 8, 9 + i * 5, 5, 1);
+    x.fillStyle = shade('material-chrome', 1); for (let k = 0; k < 8; k++) x.fillRect(10 + k * 6, 32, 4, 3);  // buttons
+    x.fillStyle = shade('material-chrome', 0.75); x.fillRect(10, 38, 44, 20);
+    x.fillStyle = shade('material-floor-dark', 1); for (let y = 40; y < 57; y += 3) x.fillRect(12, y, 40, 1);   // grille
+    x.fillStyle = shade('glow-sign', 1); x.fillRect(2, 4, 4, 58); x.fillRect(58, 4, 4, 58); }],          // side tubes
+  jukearch: [32, 32, (x, w, h) => { const c = ['glow-jukebox', 'glow-sign', 'material-cloth', 'glow-sign'];
+    for (let i = 0; i < 8; i++) { x.fillStyle = shade(c[i % 4], 1); x.fillRect(i * 4, 0, 4, h); } }],
+  neon: [8, 8, (x, w, h) => { x.fillStyle = shade('glow-sign', 1); x.fillRect(0, 0, w, h); }],
+  tube: [8, 8, (x, w, h) => { x.fillStyle = shade('glow-tube', 1); x.fillRect(0, 0, w, h); }],
+  sign: [64, 32, (x, w, h) => { x.fillStyle = shade('material-floor-dark', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('glow-sign', 1); x.fillRect(2, 2, 60, 2); x.fillRect(2, 28, 60, 2); x.fillRect(2, 2, 2, 28); x.fillRect(60, 2, 2, 28);
+    pixelText(x, 'EAT', 3, w, h); }],
+  open: [128, 32, (x, w, h) => { x.fillStyle = shade('material-floor-dark', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('glow-sign', 1); pixelText(x, 'OPEN', 3, w, h); }],
+  menu: [64, 32, (x, w, h, r) => { x.fillStyle = shade('material-floor-dark', 1); x.fillRect(0, 0, w, h);
+    x.fillStyle = shade('material-cloth', 0.95); for (let j = 0; j < 6; j++) { let px = 4; while (px < 44) { const l = 2 + Math.floor(r() * 5); x.fillRect(px, 4 + j * 4, l, 2); px += l + 1; } }
+    x.fillStyle = shade('material-formica', 1); for (let j = 0; j < 6; j++) x.fillRect(52, 4 + j * 4, 7, 2); }],
+  hill: [32, 32, (x, w, h, r) => { x.fillStyle = mixc('material-brick', 'material-formica', 0.35); x.fillRect(0, 0, w, h);
+    speck(x, w, h, r, 90, shade('material-brick', 0.8), 2); speck(x, w, h, r, 40, shade('material-formica', 0.9)); }],
+  sky: [4, 64, (x, w, h, r) => { for (let y = 0; y < h; y++) { x.fillStyle = y < 32 ? mixc('sky', 'fog', Math.pow(y / 32, 1.5)) : shade('fog', 1); x.fillRect(0, y, w, 1); }
+    if (P().light.stars) speck(x, w, 26, r, 10, shade('material-cloth', 1)); }],
+};
+function paintTex(name) {
+  const [w, h, draw] = DRAW[name];
+  let t = TEX[name];
+  if (!t) { const c = document.createElement('canvas'); c.width = w; c.height = h;
+    t = TEX[name] = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; }
+  const x = t.image.getContext('2d');
+  x.clearRect(0, 0, w, h); draw(x, w, h, mulberry32(hash(name)));
+  const d = x.getImageData(0, 0, w, h);                       // 5 bits per channel, like the textures of the era
+  for (let i = 0; i < d.data.length; i += 4) for (let k = 0; k < 3; k++) d.data[i + k] = d.data[i + k] >> 3 << 3;
+  x.putImageData(d, 0, 0);
+  t.needsUpdate = true;
+}
+function setFilters() {
+  for (const t of Object.values(TEX)) {
+    t.magFilter = broken ? THREE.LinearFilter : THREE.NearestFilter;
+    t.minFilter = broken ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter;
+    t.generateMipmaps = broken; t.anisotropy = broken ? 8 : 1; t.needsUpdate = true;
+  }
+}
+Object.keys(DRAW).forEach(paintTex);
+
+const matCache = {};
+function M(t, o = {}) {
+  const key = t + (o.emit ? ':e' + Object.keys(EMIT).find(k => EMIT[k] === o.emit) : '') + (o.hi ? ':hi' : '') + (o.unlit ? ':u' : '');
+  if (matCache[key]) return matCache[key];
+  return matCache[key] = new THREE.ShaderMaterial({
+    uniforms: { ...G, map: { value: TEX[t] }, uEmit: o.emit || EMIT.none, uHi: o.hi || HI.none,
+      uUnlit: { value: o.unlit ? 1 : 0 }, uFogOn: { value: o.unlit ? 0 : 1 } },
+    vertexShader: VS, fragmentShader: FS, side: o.side || THREE.FrontSide });
+}
+
+// ---------- geometry helpers: chunky primitives, UVs tiled by world size ----------
+const SEG = 0.5;   // faces split every 0.5 m: per-vertex light has vertices to land on, and the affine swim stays a swim, never a fold
+function box(w, h, d, x, y, z, ry = 0) {
+  const g = new THREE.BoxGeometry(w, h, d, Math.ceil(w / SEG), Math.ceil(h / SEG), Math.ceil(d / SEG));
+  if (ry) g.rotateY(ry); g.translate(x, y, z); return g;
+}
+function cyl(r, h, n, x, y, z, r2 = r) { const g = new THREE.CylinderGeometry(r2, r, h, n); g.translate(x, y, z); return g; }
+function boxUV(g, tile) {          // planar UVs from position, chosen by the face normal; tile = metres per texture repeat
+  const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    let u, v;
+    if (ax >= ay && ax >= az) { u = p.getZ(i); v = p.getY(i); } else if (ay >= az) { u = p.getX(i); v = p.getZ(i); } else { u = p.getX(i); v = p.getY(i); }
+    uv.setXY(i, u / tile, v / tile);
+  }
+  return g;
+}
+function add(parent, g, mat, tile = 1) { if (tile) boxUV(g, tile); const m = new THREE.Mesh(g, mat); parent.add(m); return m; }
+function decal(parent, w, h, mat, x, y, z, ry = 0) {   // a quad that keeps 0..1 UVs (signs, fronts)
+  const g = new THREE.PlaneGeometry(w, h, Math.ceil(w / 0.25), Math.ceil(h / 0.25));   // split, or the affine warp folds it
+  if (ry) g.rotateY(ry); g.translate(x, y, z); return add(parent, g, mat, 0);
+}
+
+// ---------- the diner ----------
+const scene = new THREE.Scene();
+const world = new THREE.Group(), solo = new THREE.Group();
+scene.add(world, solo); solo.visible = false;
+const mats = n => M(n);
+
+// shell: x -7..7, z -4..4, 3.2 m high
+add(world, box(14, 0.1, 8, 0, -0.05, 0), mats('floor'), 1);
+add(world, box(14, 0.1, 8, 0, 3.25, 0), mats('ceiling'), 1.2);
+// back wall with the pass window (x -1.6..1.6, y 1.2..2.2)
+add(world, box(14, 1.2, 0.2, 0, 0.6, -4.1), mats('wall'), 1);
+add(world, box(14, 1.0, 0.2, 0, 2.7, -4.1), mats('wall'), 1);
+add(world, box(5.4, 1.0, 0.2, -4.3, 1.7, -4.1), mats('wall'), 1);
+add(world, box(5.4, 1.0, 0.2, 4.3, 1.7, -4.1), mats('wall'), 1);
+add(world, box(3.4, 0.06, 0.5, 0, 1.2, -4.1), mats('chrome'), 0.5);
+decal(world, 2.2, 1.0, mats('menu'), -3.6, 2.55, -3.95);
+decal(world, 2.2, 1.0, mats('menu'), 3.6, 2.55, -3.95);
+// front wall with three window bays (y 1.0..2.5)
+add(world, box(14, 1.0, 0.2, 0, 0.5, 4.1), mats('wall'), 1);
+add(world, box(14, 0.7, 0.2, 0, 2.85, 4.1), mats('wall'), 1);
+for (const x of [-7, -3.5, 0, 3.5, 7]) add(world, box(0.5, 1.5, 0.24, x, 1.75, 4.1), mats('chrome'), 0.5);
+// left end wall: a window (z -3..0) and a door opening (z 1..2.2)
+add(world, box(0.2, 1.0, 3, -7.1, 0.5, -1.5), mats('wall'), 1);
+add(world, box(0.2, 0.7, 3, -7.1, 2.85, -1.5), mats('wall'), 1);
+add(world, box(0.2, 3.2, 1, -7.1, 1.6, -3.5), mats('wall'), 1);
+add(world, box(0.2, 3.2, 1, -7.1, 1.6, 0.5), mats('wall'), 1);
+add(world, box(0.2, 0.9, 1.2, -7.1, 2.75, 1.6), mats('wall'), 1);
+add(world, box(0.2, 3.2, 1.8, -7.1, 1.6, 3.1), mats('wall'), 1);
+add(world, box(0.2, 3.2, 8, 7.1, 1.6, 0), mats('wall'), 1);
+decal(world, 2.6, 0.65, M('open', { emit: EMIT.sign }), -6.95, 2.85, -1.5, Math.PI / 2);   // glyphs >= 1.5 render px per row from the seat
+// chrome trim at sill height
+add(world, box(14, 0.06, 0.3, 0, 1.0, 3.95), mats('chrome'), 0.5);
+add(world, box(0.3, 0.06, 3, -6.95, 1.0, -1.5), mats('chrome'), 0.5);
+add(world, box(0.04, 0.08, 8, 6.98, 1.0, 0), mats('chrome'), 0.5);
+// exterior brick skin around the shell
+for (const s of [-1, 1]) add(world, box(4.6, 3.6, 0.1, s * 5.0, 1.8, -4.26), mats('brick'), 0.6);   // stops at the kitchen
+add(world, box(5.4, 3.6, 0.1, 0, 1.8, -6.46), mats('brick'), 0.6);
+// ceiling fixtures
+for (const x of [-4.5, 0, 4.5]) {
+  add(world, box(1.9, 0.05, 0.42, x, 3.2, 0), mats('chrome'), 0.5);
+  add(world, box(1.8, 0.07, 0.32, x, 3.15, 0), M('tube', { emit: EMIT.tube }), 1);
+}
+
+// kitchen behind the pass
+add(world, box(5, 3.2, 0.2, 0, 1.6, -6.3), mats('brick'), 0.6);   // painted-over brick, seen through the pass
+add(world, box(0.2, 3.2, 2.2, -2.6, 1.6, -5.2), mats('tile'), 1);
+add(world, box(0.2, 3.2, 2.2, 2.6, 1.6, -5.2), mats('tile'), 1);
+add(world, box(5, 0.1, 2.2, 0, -0.05, -5.2), mats('tile'), 1);
+add(world, box(5, 0.1, 2.2, 0, 3.25, -5.2), mats('ceiling'), 1.2);
+add(world, box(3, 0.9, 0.7, 0, 0.45, -5.8), mats('chrome'), 0.6);
+add(world, box(3, 0.6, 0.8, 0, 2.6, -5.75), mats('chrome'), 0.6);
+add(world, box(3, 0.05, 0.05, 0, 2.1, -4.0), mats('chrome'), 0.5);
+for (let i = 0; i < 5; i++) add(world, box(0.13, 0.17, 0.01, -1.1 + i * 0.5, 1.98, -3.98), mats('cloth'), 0.3);
+
+// counter, x -5..4
+add(world, box(9, 1.0, 0.7, -0.5, 0.5, -1.8), mats('wall'), 1);
+add(world, box(9.2, 0.06, 0.9, -0.5, 1.03, -1.8), mats('formica'), 0.8);
+add(world, box(9.2, 0.05, 0.05, -0.5, 1.0, -1.35), mats('chrome'), 0.5);
+add(world, box(9, 0.14, 0.74, -0.5, 0.07, -1.8), mats('dark'), 1);
+for (const x of [-4.2, -3.1, -2.0, -0.9, 0.2, 1.3, 3.5]) {        // stools (2.4 is where the player sits)
+  add(world, cyl(0.24, 0.04, 8, x, 0.02, -0.95), mats('chrome'), 0.5);
+  add(world, cyl(0.05, 0.7, 6, x, 0.38, -0.95), mats('chrome'), 0.5);
+  add(world, cyl(0.23, 0.1, 8, x, 0.76, -0.95), mats('vinyl'), 0.5);
+  add(world, cyl(0.235, 0.03, 8, x, 0.7, -0.95), mats('chrome'), 0.5);
+}
+// on the counter
+add(world, cyl(0.075, 0.012, 8, 0.9, 1.066, -1.55), mats('cloth'), 0.3);
+add(world, cyl(0.04, 0.08, 6, 0.9, 1.11, -1.55), mats('cloth'), 0.3);
+add(world, cyl(0.12, 0.014, 8, 0.15, 1.067, -1.65), mats('cloth'), 0.3);
+{ const g = new THREE.CylinderGeometry(0.09, 0.09, 0.05, 1, 1, false, 0, 0.8); g.translate(0.15, 1.1, -1.65); add(world, g, mats('formica'), 0.2); }
+add(world, box(0.1, 0.12, 0.06, -0.5, 1.12, -1.9), mats('chrome'), 0.2);
+add(world, cyl(0.03, 0.16, 6, -0.62, 1.14, -1.9), mats('vinyl'), 0.2);
+add(world, cyl(0.03, 0.16, 6, -0.7, 1.14, -1.9), mats('formica'), 0.2);
+add(world, cyl(0.19, 0.02, 8, -2.6, 1.07, -1.9), mats('chrome'), 0.3);
+add(world, cyl(0.13, 0.05, 8, -2.6, 1.1, -1.9), mats('formica'), 0.3);
+{ const g = new THREE.SphereGeometry(0.18, 6, 3, 0, Math.PI * 2, 0, Math.PI / 2); g.translate(-2.6, 1.08, -1.9); add(world, g, mats('chrome'), 0.3); }
+
+// booths along the front windows
+for (const x of [-5.25, -1.75, 1.75, 5.25]) {
+  add(world, box(0.9, 0.05, 0.8, x, 0.76, 3.4), mats('formica'), 0.8);
+  add(world, box(0.92, 0.04, 0.82, x, 0.73, 3.4), mats('chrome'), 0.5);
+  add(world, cyl(0.05, 0.72, 6, x, 0.36, 3.4), mats('chrome'), 0.5);
+  for (const s of [-1, 1]) {
+    add(world, box(0.5, 0.45, 0.9, x + s * 0.75, 0.225, 3.45), mats('vinyl'), 0.5);
+    add(world, box(0.16, 0.8, 0.9, x + s * 1.05, 0.85, 3.45), mats('vinyl'), 0.5);
+  }
+  add(world, cyl(0.03, 0.15, 6, x + 0.2, 0.86, 3.6), mats('vinyl'), 0.2);
+  add(world, box(0.1, 0.12, 0.06, x - 0.1, 0.84, 3.65), mats('chrome'), 0.2);
+}
+
+// the cook: a Meshy model (ComfyUI concept -> image-to-3D, about 2,600 triangles) with its texture cut to
+// 256 px and 5 bits per channel, drawn by the same shader as everything else (snap, affine, Gouraud).
+// Facing +z, feet at the origin, 1.95 m to the top of the toque.
+{
+  let map = null;
+  COOK.scene.traverse(o => { if (o.isMesh) { map = map || o.material.map; if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); } });
+  TEX.cook = map; map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
+  map.colorSpace = THREE.NoColorSpace;   // sample the texels as authored, like every other texture here (sRGB decode would darken and oversaturate them)
+}
+const COOK_YAW = 0;                       // the model's own facing, turned to +z
+function cook(parent) {
+  const g = new THREE.Group(); parent.add(g);
+  const m = COOK.scene.clone(true);
+  m.traverse(o => { if (o.isMesh) o.material = M('cook'); });
+  m.rotation.y = COOK_YAW;
+  const b = new THREE.Box3().setFromObject(m), size = b.getSize(new THREE.Vector3()), k = 1.95 / size.y;
+  m.scale.setScalar(k);
+  const c = b.getCenter(new THREE.Vector3());
+  m.position.set(-c.x * k, -b.min.y * k, -c.z * k);
+  g.add(m);
+  return g;
+}
+// the jukebox (facing +z, base at the origin)
+function jukebox(parent) {
+  const g = new THREE.Group(); parent.add(g);
+  const hi = { hi: HI.juke };
+  add(g, box(0.94, 0.08, 0.64, 0, 0.04, 0), M('chrome', hi), 0.5);
+  add(g, box(0.9, 1.15, 0.6, 0, 0.655, 0), M('wood', hi), 0.5);
+  decal(g, 0.78, 1.05, M('jukefront', { emit: EMIT.juke, ...hi }), 0, 0.66, 0.315);
+  const a = new THREE.CylinderGeometry(0.45, 0.45, 0.6, 8, 1, false, Math.PI / 2, Math.PI);
+  a.rotateX(Math.PI / 2); a.translate(0, 1.23, 0); add(g, a, M('jukearch', { emit: EMIT.juke, ...hi }), 0.25);
+  for (const s of [-1, 1]) add(g, box(0.05, 1.05, 0.05, s * 0.43, 0.66, 0.31), M('neon', { emit: EMIT.juke, ...hi }), 1);
+  return g;
+}
+const cookW = cook(world); cookW.position.set(-0.6, 0, -3.0); cookW.rotation.y = 0.35;
+const jukeW = jukebox(world); jukeW.position.set(-6.35, 0, -3.35); jukeW.rotation.y = Math.PI / 4;
+
+// outside: lot, car, roadside sign, roads, poles, hills, sky
+// the lot: four pieces around the diner's floor slab, never under it (a ground plane under the floor
+// pokes up through it once vertices snap)
+for (const [x0, x1, z0, z1] of [[-80, 80, -80, -6.4], [-80, 80, 4, 80], [-80, -7, -6.4, 4], [7, 80, -6.4, 4]]) {
+  const w = x1 - x0, d = z1 - z0, g = new THREE.PlaneGeometry(w, d, Math.ceil(w / 2), Math.ceil(d / 2));
+  g.rotateX(-Math.PI / 2); g.translate((x0 + x1) / 2, -0.02, (z0 + z1) / 2); add(world, g, mats('asphalt'), 2);
+}
+for (const x of [-9.2, -12.0]) add(world, box(0.08, 0.012, 4.8, x, 0, -1.6), mats('cloth'), 0.5);
+{ const g = new THREE.PlaneGeometry(200, 7, 50, 2); g.rotateX(-Math.PI / 2); g.translate(0, -0.01, 17);
+  const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 50, uv.getY(i)); add(world, g, mats('road'), 0); }
+{ const g = new THREE.PlaneGeometry(200, 7, 50, 2); g.rotateX(-Math.PI / 2); g.rotateY(Math.PI / 2); g.translate(-24, -0.01, 0);   // runs along z, beside the diner (it used to run along x, under the floor)
+  const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 50, uv.getY(i)); add(world, g, mats('road'), 0); }
+{ const x = -10.6, z = -1.6, car = world;           // a two-tone sedan, parked side-on to the end window
+  add(car, box(1.8, 0.55, 4.4, x, 0.6, z), mats('paint'), 1.1);
+  add(car, box(1.62, 0.34, 2.2, x, 1.05, z + 0.2), mats('glass'), 1.2);
+  add(car, box(1.66, 0.1, 2.0, x, 1.26, z + 0.2), mats('cloth'), 1);
+  for (const s of [-1, 1]) add(car, box(0.12, 0.26, 0.9, x + s * 0.84, 0.98, z - 1.75), mats('paint'), 1);
+  for (const s of [-1, 1]) add(car, box(1.92, 0.14, 0.16, x, 0.42, z + s * 2.25), mats('chrome'), 0.4);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const w = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 8); w.rotateZ(Math.PI / 2); w.translate(x + sx * 0.84, 0.34, z + sz * 1.4); add(car, w, mats('dark'), 0.5);
+    const h = new THREE.CylinderGeometry(0.16, 0.16, 0.28, 6); h.rotateZ(Math.PI / 2); h.translate(x + sx * 0.84, 0.34, z + sz * 1.4); add(car, h, mats('chrome'), 0.3);
+  }
+  for (const s of [-1, 1]) add(car, box(0.32, 0.14, 0.04, x + s * 0.55, 0.66, z + 2.21), M('tube', { emit: EMIT.head }), 1);
+}
+{ const x = -15, z = -2.2;
+  for (const s of [-1, 1]) add(world, cyl(0.06, 2.0, 6, x, 1.0, z + s * 1.2), mats('chrome'), 0.5);
+  add(world, box(0.3, 1.3, 3.0, x, 2.6, z), mats('dark'), 1);
+  decal(world, 2.9, 1.2, M('sign', { emit: EMIT.sign }), x + 0.17, 2.6, z, Math.PI / 2);
+}
+for (let x = -60; x <= 60; x += 15) { add(world, cyl(0.1, 7, 6, x, 3.5, 20.5), mats('wood'), 1); add(world, box(1.6, 0.1, 0.1, x, 6.6, 20.5), mats('wood'), 1); }
+for (const [x, z, r, h] of [[-60, -20, 14, 7], [-55, 25, 12, 5], [10, 70, 16, 6], [-30, 60, 11, 8], [45, 55, 14, 5], [-75, 2, 12, 6], [-40, -45, 15, 9]]) {
+  const g = new THREE.ConeGeometry(r, h, 5); g.translate(x, h / 2, z); add(world, g, mats('hill'), 3);
+}
+add(world, box(22, 9, 12, -85, 4.5, -30), mats('hill'), 3);
+const skyMesh = (() => { const g = new THREE.SphereGeometry(250, 8, 6); return add(scene, g, M('sky', { unlit: true, side: THREE.BackSide }), 0); })();
+
+// ---------- single-subject stages: turntable shots for character and prop ----------
+add(solo, cyl(0.9, 0.05, 8, 0, -0.025, 0), mats('floor'), 0.5);
+const cookS = cook(solo), jukeS = jukebox(solo);
+
+// ---------- lighting from the palette ----------
+let view = 'fp';
+function applyPalette() {
+  const p = P(), L = p.light, col = r => new THREE.Color(p[r]);
+  for (const k of Object.keys(DRAW)) paintTex(k);
+  setFilters();
+  G.uAmb.value.copy(col('ambient')).multiplyScalar(L.amb);
+  G.uSunCol.value.copy(col('key')).multiplyScalar(L.sun);
+  G.uSunDir.value.set(...L.sunDir).normalize();
+  G.uFogCol.value.copy(col('fog')); G.uAccent.value.copy(col('accent'));
+  scene.background = col('fog');
+  const pts = view === 'fp'
+    ? [[[-4.5, 3.0, 0], col('key').multiplyScalar(L.tubes * 0.9), 0.12], [[0, 3.0, 0], col('key').multiplyScalar(L.tubes * 0.9), 0.12],
+       [[4.5, 3.0, 0], col('key').multiplyScalar(L.tubes * 0.9), 0.12], [[-14.4, 2.6, -2.2], col('glow-sign').multiplyScalar(L.sign * 1.6), 0.08],
+       [[-5.9, 1.2, -2.9], col('glow-jukebox').multiplyScalar(L.juke * 0.8), 0.9], [[0, 2.3, -4.8], col('key').multiplyScalar(L.kitchen), 0.3]]
+    : [[[1.6, 3.0, 2.2], col('key').multiplyScalar(0.5 + L.tubes * 0.5), 0.06], [[-2.0, 1.4, -1.6], col('glow-sign').multiplyScalar(L.sign * 0.8), 0.2],
+       [[0, 0, 0], new THREE.Color(0, 0, 0), 1], [[0, 0, 0], new THREE.Color(0, 0, 0), 1], [[0, 0, 0], new THREE.Color(0, 0, 0), 1], [[0, 0, 0], new THREE.Color(0, 0, 0), 1]];
+  pts.forEach(([pos, c, k], i) => { G.uPtPos.value[i].set(...pos); G.uPtCol.value[i].copy(c); G.uPtK.value[i] = k; });
+  G.uFogNear.value = view === 'fp' ? L.fogNear : 40; G.uFogFar.value = view === 'fp' ? L.fogFar : 90;
+  EMIT.tube.value = L.tubes * 0.9 + 0.1; EMIT.sign.value = L.sign; EMIT.juke.value = L.juke; EMIT.head.value = L.head;
+  const rs = document.documentElement.style;
+  for (const r of ['ink', 'panel', 'accent', 'fog', 'signal-ok', 'signal-warn', 'signal-danger', 'signal-info']) rs.setProperty('--' + r, p[r]);
+  requestRender();
+}
+
+// ---------- cameras ----------
+const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.05, 300);
+camera.rotation.order = 'YXZ';
+const SEAT = new THREE.Vector3(2.4, 1.5, -0.95);                  // seated eye height 1.5 m on a counter stool
+const D2R = Math.PI / 180;
+const look = { yaw: 84, pitch: -7 }, want = { yaw: 84, pitch: -7 };
+let spin = 0;
+function setView(v) {
+  view = v; world.visible = v === 'fp'; solo.visible = v !== 'fp';
+  cookS.visible = v === 'cook'; jukeS.visible = v === 'juke';
+  for (const [id, k] of [['vFp', 'fp'], ['vCook', 'cook'], ['vJuke', 'juke']]) document.getElementById(id).setAttribute('aria-pressed', v === k);
+  applyPalette();
+}
+function placeCamera(t) {
+  if (view === 'fp') {
+    camera.fov = 55; camera.position.copy(SEAT); camera.position.y += FRAME ? 0 : Math.sin(t * 0.9) * 0.004;
+    const roll = FRAME ? 0 : (Math.sin(t * 0.55) * 0.018 + Math.sin(t * 0.23) * 0.01) * 0.3;
+    camera.rotation.set(look.pitch * D2R, look.yaw * D2R, roll);
+  } else {                                                          // turntable: three-quarter view, slow spin when live
+    const tall = view === 'cook' ? 2.1 : 1.7, a = (35 + spin) * D2R, d = view === 'cook' ? 4.2 : 3.9;
+    camera.fov = 35; camera.position.set(Math.sin(a) * d, tall * 0.72, Math.cos(a) * d);
+    camera.lookAt(0, tall * 0.48, 0);
+  }
+  camera.updateProjectionMatrix();
+}
+
+// ---------- render targets and the post pass: nearest upscale, 4x4 ordered dither, 31 levels per channel ----------
+let rt = null;
+const postMat = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse: { value: null }, uLow: { value: new THREE.Vector2(427, 240) }, uDither: { value: 1 } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse; uniform vec2 uLow; uniform float uDither; varying vec2 vUv;
+    const float B[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
+    void main() {
+      vec3 c;
+      if (uDither > 0.5) {
+        vec2 px = floor(vUv * uLow);
+        c = texture2D(tDiffuse, (px + 0.5) / uLow).rgb;
+        int i = int(mod(px.y, 4.0)) * 4 + int(mod(px.x, 4.0));
+        c += ((B[i] + 0.5) / 16.0 - 0.5) * 1.2 / 31.0;      // dither: 1.2 quantisation steps peak to peak
+        c = floor(clamp(c, 0.0, 1.0) * 31.0 + 0.5) / 31.0;   // 5 bits per channel
+      } else c = texture2D(tDiffuse, vUv).rgb;
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+  depthTest: false, depthWrite: false });
+const postScene = new THREE.Scene(), postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
+
+function resize() {
+  renderer.setSize(W(), H(), !FRAME);
+  const lw = broken ? W() : lowW(), lh = broken ? H() : LINES;
+  if (rt) rt.dispose();
+  rt = new THREE.WebGLRenderTarget(lw, lh, broken
+    ? { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, samples: 4 }
+    : { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  postMat.uniforms.tDiffuse.value = rt.texture; postMat.uniforms.uLow.value.set(lw, lh);
+  postMat.uniforms.uDither.value = broken ? 0 : 1;
+  G.uRes.value.set(lw, lh); G.uSnap.value = broken ? 0 : 1; G.uAffine.value = broken ? 0 : 1; G.uPerPixel.value = broken ? 1 : 0;
+  camera.aspect = W() / H();
+  const hud = document.getElementById('hud'), s = FRAME ? 1 : Math.min(W() / 1280, H() / 720);
+  hud.style.transform = `scale(${s})`; hud.dataset.s = s;
+  requestRender();
+}
+function setBroken(on) { broken = on; document.getElementById('bBroken').setAttribute('aria-pressed', on); setFilters(); resize(); }
+
+// ---------- the prompt over the jukebox, placed clear of every panel and every world sign ----------
+const SIGNS = [[-14.83, 2.6, -2.2, 1.45, 0.6], [-6.95, 2.85, -1.5, 1.3, 0.325]];   // centre x, y, z; half width (along z), half height
+function placePrompt() {
+  const el = document.getElementById('prompt');
+  if (view !== 'fp') { el.style.display = 'none'; return; }
+  const s = +document.getElementById('hud').dataset.s || 1;
+  const v = new THREE.Vector3(0, 1.75, 0).applyMatrix4(jukeW.matrixWorld).project(camera);
+  let x = (v.x + 1) / 2 * W() / s, y = (1 - v.y) / 2 * H() / s - 8;
+  x = Math.min(Math.max(x, 140), 1280 - 412 - 140);                 // left of the orders panel
+  const yMin = 110, yMax = 720 - 270;                               // below the status bar, above the dialogue
+  y = Math.min(Math.max(y, yMin), yMax);
+  el.style.display = 'block';
+  const pw = el.offsetWidth, ph = el.offsetHeight, m = 8;
+  // never cover a readable world sign: move below it, else above it
+  const signs = SIGNS.map(([sx, sy, sz, hw, hh]) => {
+    const pts = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([a, b]) => new THREE.Vector3(sx, sy + b * hh, sz + a * hw).project(camera));
+    if (pts.some(p => p.z > 1)) return null;
+    const xs = pts.map(p => (p.x + 1) / 2 * W() / s), ys = pts.map(p => (1 - p.y) / 2 * H() / s);
+    return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m];
+  }).filter(Boolean);
+  const hits = yy => signs.find(([l, t, r, b]) => x - pw / 2 < r && x + pw / 2 > l && yy - ph < b && yy > t);
+  for (let n = 0, r; n < 4 && (r = hits(y)); n++) {
+    const below = r[3] + ph;
+    y = below <= yMax ? below : Math.max(r[1], yMin);
+  }
+  Object.assign(el.style, { left: x + 'px', top: y + 'px' });
+}
+
+// ---------- animation and render loop ----------
+const fixedT = 1.3;   // the time every frame-mode render uses
+function requestRender() { needRender = true; activeUntil = performance.now() + 400; kick(); }
+let prevT = 0;
+function update(t) {
+  const dt = Math.min(t - prevT, 0.1); prevT = t;
+  const k = FRAME ? 1 : 1 - Math.exp(-dt * 7);                     // eased look
+  look.yaw += (want.yaw - look.yaw) * k; look.pitch += (want.pitch - look.pitch) * k;
+  if (!FRAME && view !== 'fp') spin += dt * 20;
+  HI.juke.value = view === 'fp' && !broken ? 0.25 + 0.2 * Math.sin(t * 6) : 0;   // the accent's one job: this can be used
+  EMIT.sign.value = P().light.sign * (0.92 + 0.05 * Math.sin(t * 13) + 0.03 * Math.sin(t * 31));
+  placeCamera(t);
+}
+function draw() {
+  scene.updateMatrixWorld();
+  renderer.setRenderTarget(rt); renderer.render(scene, camera);
+  renderer.setRenderTarget(null); renderer.render(postScene, postCam);
+  if (document.getElementById('hud').classList.contains('on')) placePrompt();
+}
+let frameCount = 0;
+function loop(ms) {
+  if (FRAME) {
+    update(fixedT); draw();
+    if (++frameCount < 10) requestAnimationFrame(loop); else document.title = 'ready';
+    return;
+  }
+  if (document.hidden) { running = false; return; }
+  const busy = ms < activeUntil || Math.abs(want.yaw - look.yaw) + Math.abs(want.pitch - look.pitch) > 0.05;
+  if (busy || needRender || ms - last >= 100) {                    // about 10 fps when idle
+    update(ms / 1000); draw(); last = ms; needRender = false;
+  }
+  requestAnimationFrame(loop);
+}
+function kick() { if (!FRAME && !running && !document.hidden) { running = true; requestAnimationFrame(loop); } }
+document.addEventListener('visibilitychange', kick);
+
+// ---------- interaction (outside frame mode) ----------
+if (!FRAME) {
+  const clampLook = () => { want.yaw = Math.min(Math.max(want.yaw, 84 - 70), 84 + 70); want.pitch = Math.min(Math.max(want.pitch, -45), 20); };
+  let drag = null;
+  canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointerup', () => { drag = null; });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag || view !== 'fp') return;
+    want.yaw += (e.clientX - drag[0]) * 0.15; want.pitch += (e.clientY - drag[1]) * 0.12; drag = [e.clientX, e.clientY];
+    clampLook(); requestRender();
+  });
+  addEventListener('keydown', e => {
+    const d = { ArrowLeft: [8, 0], ArrowRight: [-8, 0], ArrowUp: [0, 5], ArrowDown: [0, -5] }[e.key];
+    if (d && view === 'fp') { want.yaw += d[0]; want.pitch += d[1]; clampLook(); requestRender(); e.preventDefault(); }
+  });
+  const sel = document.getElementById('pal');
+  for (const [k, p] of Object.entries(PALETTES)) sel.add(new Option(p.label, k, false, k === palName));
+  sel.onchange = () => { palName = sel.value; applyPalette(); };
+  document.getElementById('vFp').onclick = () => setView('fp');
+  document.getElementById('vCook').onclick = () => setView('cook');
+  document.getElementById('vJuke').onclick = () => setView('juke');
+  document.getElementById('bHud').onclick = e => {
+    const on = document.getElementById('hud').classList.toggle('on'); e.currentTarget.setAttribute('aria-pressed', on); requestRender();
+  };
+  document.getElementById('bBroken').onclick = () => setBroken(!broken);
+  addEventListener('resize', resize);
+}
+
+// ---------- start ----------
+if (FRAME === 'character') setView('cook');
+else if (FRAME === 'prop') setView('juke');
+else setView('fp');
+if (FRAME === 'text-heavy') document.getElementById('hud').classList.add('on');
+resize();
+if (FRAME) requestAnimationFrame(loop); else kick();
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# PixelForge config for this entry's generated sprites and signs (run from this folder).
+[palette]
+source = "cast-palette.gpl"
+metric = "redmean"
+
+# set colours: only the painted signs may use them, never a person
+[[palette.reserved]]
+name = "set"
+colors = ["#b07052", "#7f513b", "#6e9450", "#4f6b3a", "#c8b8a0", "#908473", "#9a968c", "#6f6c65"]
+allow_in = ["signs/**", "_staging/signs/**"]
+
+# the cast's own colours: never on the set's signs, so the cast stays the most saturated thing
+[[palette.reserved]]
+name = "cast"
+colors = ["#e0a882", "#a1795e", "#4a3020", "#352317", "#d0483c", "#96342b", "#3c78c8", "#2b5690", "#ede6d6", "#aba69a"]
+allow_in = ["sprites/**"]
+
+[[canvas]]
+name = "sprite"
+size = [32, 48]
+paths = ["sprites/*.png"]
+max_colors = 15
+hard_alpha = true
+anchor = "bottom"
+
+[[canvas]]
+name = "sign"
+size = [48, 24]
+paths = ["signs/*.png", "_staging/signs/*.png"]
+max_colors = 12
+hard_alpha = true

@@ -1,0 +1,26 @@
+GIMP Palette
+Name: chunky-bright-pixel-art - example
+Columns: 4
+# One instance of the colour structure in style.md (the demo's 'market' palette). Never ship it
+# as is: every game re-chooses each role for its own tone. 16 colours, the whole game included.
+# Checked: ink on paper 16.0:1; ink on accent 5.4:1; ink on signals 5.3-9.7:1; ink on bg 10.7-12.5:1;
+# ink value 0.19, chroma 0.11; warm ramp values 0.42<0.72<0.91<1.00, step contrast 1.67-2.10,
+# hue shift 12-24 deg/step; cool ramp values 0.35<0.62<0.78<0.91, step contrast 2.02-2.33,
+# hue shift 21-29 deg/step; accent chroma 0.78, 24 deg from nearest ramp/signal hue;
+# signal chroma >= 0.51; bg chroma <= 0.26 (value = HSV V, chroma = S x V, contrast = WCAG).
+ 30  20  48	ink          #1E1430
+255 244 214	paper        #FFF4D6
+255  56 176	accent       #FF38B0
+107 217  74	signal-good  #6BD94A
+255  75  62	signal-bad   #FF4B3E
+182 124 255	signal-rare  #B67CFF
+107  46  58	warm-1       #6B2E3A
+184  84  58	warm-2       #B8543A
+232 154  76	warm-3       #E89A4C
+255 215 122	warm-4       #FFD77A
+ 43  36  89	cool-1       #2B2459
+ 51  88 158	cool-2       #33589E
+ 63 160 200	cool-3       #3FA0C8
+155 232 228	cool-4       #9BE8E4
+191 224 230	bg-sky       #BFE0E6
+230 196 164	bg-far       #E6C4A4

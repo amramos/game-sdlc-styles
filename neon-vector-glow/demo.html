@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neon vector glow demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  #ui { position: fixed; left: 8px; bottom: 8px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px;
+        font: 13px/1.3 ui-monospace, Consolas, monospace; color: #cfd8e8; }
+  #ui button { font: inherit; background: #0b0f1a; color: #cfd8e8; border: 1px solid #3a4560; padding: 4px 8px; cursor: pointer; }
+  #ui button[aria-pressed="true"] { border-color: #e6eeff; background: #1a2238; }
+  body.frame #ui { display: none; }
+  /* Frame mode: a fixed 1280x720 canvas at the top-left, whatever the viewport, so captures are exact. */
+  body.frame canvas { left: 0; top: 0; transform: none; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Neon vector glow demo scene"></canvas>
+<div id="ui"></div>
+
+<!-- Palettes: the same roles, three instances. scripts/check reads this block. -->
+<script id="palettes" type="application/json">
+{
+  "cold-core": { "label": "Cold core",
+    "void": "#05060C", "grid": "#172652", "player": "#33F0FF", "core": "#5CFFA8", "pickup": "#F0FF3D",
+    "danger": "#FF2B3A", "enemy-seeker": "#FF3DD8", "enemy-splitter": "#FF8A1F", "enemy-warden": "#9A5CFF",
+    "hud-ink": "#E6EEFF", "hud-panel": "#0A0F1E" },
+  "acid": { "label": "Acid",
+    "void": "#030805", "grid": "#0F3320", "player": "#FFD23A", "core": "#A8FF3A", "pickup": "#4DFF6A",
+    "danger": "#FF2E9A", "enemy-seeker": "#2EFFD5", "enemy-splitter": "#3D8BFF", "enemy-warden": "#A64DFF",
+    "hud-ink": "#F2F5E6", "hud-panel": "#08100B" },
+  "ember": { "label": "Ember",
+    "void": "#0A0405", "grid": "#3A1420", "player": "#FF7A2E", "core": "#FFE94D", "pickup": "#C8FF3D",
+    "danger": "#FF2EC4", "enemy-seeker": "#3DFF8A", "enemy-splitter": "#3DE0FF", "enemy-warden": "#7462FF",
+    "hud-ink": "#FFF0EA", "hud-panel": "#140A0B" }
+}
+</script>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Setup. Everything is drawn in a 1280x720 logical space; widths are 720p px.
+// ---------------------------------------------------------------------------
+const W = 1280, H = 720;
+const params = new URLSearchParams(location.search);
+const FRAME = params.get("frame");
+const PALETTES = JSON.parse(document.getElementById("palettes").textContent);
+let palName = PALETTES[params.get("palette")] ? params.get("palette") : "cold-core";
+let P = PALETTES[palName];
+
+const cv = document.getElementById("c");
+const MAIN = cv.getContext("2d");
+let ctx = MAIN;              // the current drawing target; a glow pass swaps it to the line layer
+let K = 1;
+// Offscreen layers for the glow: LN holds the crisp lines (colour core + near-white centre),
+// BL the bloom source (the same lines in pure colour, a little wider), and TMP the blurred copies
+// at full, half and quarter resolution (wide blurs are cheap at low resolution and stay smooth).
+const mkLayer = () => { const c = document.createElement("canvas"); return { c, x: c.getContext("2d") }; };
+const LN = mkLayer(), BL = mkLayer(), TMP = { 1: mkLayer(), 0.5: mkLayer(), 0.25: mkLayer() };
+function fit() {
+  const s = FRAME ? 1 : Math.min(innerWidth / W, innerHeight / H);   // frames: exactly 1280x720
+  const dpr = FRAME ? 1 : (window.devicePixelRatio || 1);
+  cv.style.width = W * s + "px";
+  cv.style.height = H * s + "px";
+  cv.width = Math.round(W * s * dpr);
+  cv.height = Math.round(H * s * dpr);
+  K = cv.width / W;
+  for (const L of [LN, BL]) { L.c.width = cv.width; L.c.height = cv.height; }
+  for (const sc of [1, 0.5, 0.25]) { TMP[sc].c.width = Math.ceil(cv.width * sc); TMP[sc].c.height = Math.ceil(cv.height * sc); }
+}
+fit();
+
+// Seeded random (mulberry32), so frames are identical on every capture.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let rng = mulberry32(FRAME ? 7 : (Date.now() & 0xffff));
+const rr = (a, b) => a + (b - a) * rng();
+
+// Colour helpers.
+const rgbCache = {};
+function rgb(hex) {
+  if (!rgbCache[hex]) {
+    const n = parseInt(hex.slice(1), 16);
+    rgbCache[hex] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  return rgbCache[hex];
+}
+function mix(hex, toHex, t) {
+  const a = rgb(hex), b = rgb(toHex);
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`;
+}
+function rgba(hex, a) { const c = rgb(hex); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+
+// ---------------------------------------------------------------------------
+// Glow: a bloom pass, like a neon tube or a vector monitor.
+//   1. Inside a glow pass, every glowing line is drawn twice:
+//      LN (crisp):  the core in its colour (width w), then a near-white centre (75% toward
+//                   white, width 0.45w) on top, normal blend, so overlapping cores keep their hue;
+//      BL (bloom source): the same path in pure colour, width w + 2k, additive, so where shapes
+//                   overlap their light adds.
+//   2. endGlow() blurs BL at three radii (tight inner halo, mid glow, wide soft bloom that
+//      lights the void around it) and adds each onto the frame, with a gain above 1 (the
+//      blurred copy is drawn several times). Then LN goes on top.
+//   Danger shots get their own, tighter pass after a void rim; the HUD its own, tighter still.
+// ---------------------------------------------------------------------------
+const BLOOM = {   // r: blur radius in 720p px; g: gain (copies added); s: working resolution
+  world:  [{ r: 2, g: 1.2, s: 1 }, { r: 7, g: 1.8, s: 0.5 }, { r: 24, g: 3.2, s: 0.25 }],
+  danger: [{ r: 2, g: 1.0, s: 1 }, { r: 6, g: 1.2, s: 0.5 }],
+  hud:    [{ r: 1.5, g: 0.55, s: 1 }, { r: 5, g: 0.45, s: 0.5 }],
+  dont:   [{ r: 5, g: 1.6, s: 1 }, { r: 16, g: 2.2, s: 0.5 }],
+};
+let glowing = false;
+function beginGlow() {
+  for (const L of [LN, BL]) { L.x.setTransform(1, 0, 0, 1, 0, 0); L.x.clearRect(0, 0, L.c.width, L.c.height); }
+  LN.x.setTransform(MAIN.getTransform());
+  ctx = LN.x; glowing = true;
+}
+// src "bloom": blur the colour-only source; "line": blur the crisp layer itself (HUD text).
+function endGlow(spec, src = "bloom") {
+  ctx = MAIN; glowing = false;
+  const m = MAIN, S = src === "line" ? LN : BL;
+  m.save(); m.setTransform(1, 0, 0, 1, 0, 0);
+  m.globalCompositeOperation = "lighter";
+  for (const b of spec) {
+    const T = TMP[b.s];
+    T.x.setTransform(1, 0, 0, 1, 0, 0); T.x.clearRect(0, 0, T.c.width, T.c.height);
+    T.x.filter = `blur(${(b.r * K * b.s).toFixed(2)}px)`;
+    T.x.drawImage(S.c, 0, 0, T.c.width, T.c.height);
+    T.x.filter = "none";
+    for (let g = b.g; g > 0.01; g -= 1) { m.globalAlpha = Math.min(1, g); m.drawImage(T.c, 0, 0, cv.width, cv.height); }
+  }
+  m.globalAlpha = 1; m.globalCompositeOperation = "source-over";
+  m.drawImage(LN.c, 0, 0);
+  m.restore();
+}
+// Also draw the current path into the bloom source, with ctx's transform, dash and alpha.
+function toBloom(path, col, width, alpha = 1) {
+  if (!glowing) return;
+  const b = BL.x;
+  b.setTransform(ctx.getTransform());
+  b.setLineDash(ctx.getLineDash()); b.lineDashOffset = ctx.lineDashOffset;
+  b.lineJoin = "round"; b.lineCap = "round";
+  b.globalCompositeOperation = "lighter";
+  b.globalAlpha = Math.min(1, alpha * ctx.globalAlpha);
+  b.strokeStyle = col; b.lineWidth = width;
+  b.stroke(path);
+}
+function glowStroke(path, col, w, k = 1) {
+  toBloom(path, col, w + 2 * k, Math.min(1, k));
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(path);                                       // core
+  ctx.strokeStyle = mix(col, "#FFFFFF", 0.75); ctx.lineWidth = Math.max(1, w * 0.45); ctx.stroke(path); // near-white centre
+}
+function withXform(x, y, a, s, fn) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a); fn(s); ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Shapes (original). Each class is told apart by silhouette first, colour second.
+// ---------------------------------------------------------------------------
+function pathPoly(pts, closed = true) {
+  const p = new Path2D(); p.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
+  if (closed) p.closePath();
+  return p;
+}
+const SHAPES = {
+  // Player: a notched dart pointing along +x, with an engine tick.
+  player(r) {
+    const p = pathPoly([[r, 0], [-0.7 * r, 0.62 * r], [-0.32 * r, 0], [-0.7 * r, -0.62 * r]]);
+    p.moveTo(-0.5 * r, 0); p.lineTo(-0.95 * r, 0);
+    return p;
+  },
+  // Seeker: an open triangle (gaps at the corners) with a centre dot; points along +x.
+  seeker(r) {
+    const c = [0, 2.094, 4.189].map(a => [Math.cos(a) * r, Math.sin(a) * r]);
+    const p = new Path2D();
+    for (let i = 0; i < 3; i++) {
+      const a = c[i], b = c[(i + 1) % 3];
+      p.moveTo(a[0] + (b[0] - a[0]) * 0.18, a[1] + (b[1] - a[1]) * 0.18);
+      p.lineTo(a[0] + (b[0] - a[0]) * 0.82, a[1] + (b[1] - a[1]) * 0.82);
+    }
+    p.moveTo(r * 0.12, 0); p.arc(0, 0, r * 0.12, 0, Math.PI * 2);
+    return p;
+  },
+  // Splitter: three rings in a cluster; it breaks into three.
+  splitter(r) {
+    const p = new Path2D();
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + i * 2.094, x = Math.cos(a) * r * 0.5, y = Math.sin(a) * r * 0.5;
+      p.moveTo(x + r * 0.42, y); p.arc(x, y, r * 0.42, 0, Math.PI * 2);
+    }
+    return p;
+  },
+  // Warden: two facing brackets and a bar; it shields its group.
+  warden(r) {
+    const p = new Path2D();
+    p.moveTo(-0.3 * r, -r); p.lineTo(-r, -r); p.lineTo(-r, r); p.lineTo(-0.3 * r, r);
+    p.moveTo(0.3 * r, -r); p.lineTo(r, -r); p.lineTo(r, r); p.lineTo(0.3 * r, r);
+    p.moveTo(-0.4 * r, 0); p.lineTo(0.4 * r, 0);
+    return p;
+  },
+  // The "dont" frame: every enemy is the same circle, told apart by colour alone.
+  blob(r) { const p = new Path2D(); p.arc(0, 0, r * 0.8, 0, Math.PI * 2); return p; },
+  // Pickups.
+  shard(r) { const p = new Path2D(); p.arc(0, 0, r, 0, Math.PI * 2); p.moveTo(r * 0.25, 0); p.arc(0, 0, r * 0.25, 0, Math.PI * 2); return p; },
+  multiplier(r) {
+    const p = new Path2D(); p.arc(0, 0, r, 0, Math.PI * 2);
+    const q = r * 0.45; p.moveTo(-q, -q); p.lineTo(q, q); p.moveTo(q, -q); p.lineTo(-q, q);
+    return p;
+  },
+  shield(r) {
+    const p = new Path2D(); p.arc(0, 0, r, Math.PI * 0.75, Math.PI * 2.25);
+    p.moveTo(r * 0.5, 0); p.lineTo(-r * 0.5, 0); p.moveTo(0, -r * 0.5); p.lineTo(0, r * 0.5);
+    return p;
+  },
+  hex(r, rot = 0) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) { const a = rot + i * Math.PI / 3; pts.push([Math.cos(a) * r, Math.sin(a) * r]); }
+    return pathPoly(pts);
+  },
+};
+const ENEMY_KINDS = ["seeker", "splitter", "warden"];
+const KIND_INFO = {
+  seeker:   { name: "SEEKER",   verb: "homes in on you" },
+  splitter: { name: "SPLITTER", verb: "breaks into three" },
+  warden:   { name: "WARDEN",   verb: "fires red shots" },
+};
+const PICKUP_INFO = {
+  shard: { name: "SHARD", verb: "score" },
+  multiplier: { name: "MULTIPLIER", verb: "+1 to the multiplier" },
+  shield: { name: "SHIELD", verb: "repairs the core" },
+};
+
+// ---------------------------------------------------------------------------
+// The grid: a spring mesh. Spacing 40 px at 720p; each point is pulled to its
+// rest position (KA) and keeps its offset from its 4 neighbours (KN).
+// Impulses push points outward; offset is capped at 0.6 x spacing.
+// ---------------------------------------------------------------------------
+const GS = 40, GC = W / GS + 1, GR = H / GS + 1;
+const KA = 0.025, KN = 0.06, GD = 0.07, GMAX = 0.6 * GS;
+const grid = { px: new Float32Array(GC * GR), py: new Float32Array(GC * GR),
+               vx: new Float32Array(GC * GR), vy: new Float32Array(GC * GR) };
+function gridReset() {
+  for (let y = 0; y < GR; y++) for (let x = 0; x < GC; x++) {
+    const i = y * GC + x; grid.px[i] = x * GS; grid.py[i] = y * GS; grid.vx[i] = 0; grid.vy[i] = 0;
+  }
+}
+gridReset();
+function gridImpulse(x, y, strength, radius) {
+  for (let i = 0; i < GC * GR; i++) {
+    const dx = grid.px[i] - x, dy = grid.py[i] - y, d = Math.hypot(dx, dy);
+    if (d < radius && d > 0.001) {
+      const f = strength * (1 - d / radius) ** 2;
+      grid.vx[i] += dx / d * f; grid.vy[i] += dy / d * f;
+    }
+  }
+}
+function gridStep() {               // one 1/60 s step
+  const { px, py, vx, vy } = grid;
+  for (let y = 1; y < GR - 1; y++) for (let x = 1; x < GC - 1; x++) {
+    const i = y * GC + x, rx = x * GS, ry = y * GS;
+    let fx = (rx - px[i]) * KA, fy = (ry - py[i]) * KA;
+    const ox = px[i] - rx, oy = py[i] - ry;
+    for (const j of [i - 1, i + 1, i - GC, i + GC]) {
+      const jx = j % GC, jy = (j - jx) / GC;
+      fx += ((px[j] - jx * GS) - ox) * KN;
+      fy += ((py[j] - jy * GS) - oy) * KN;
+    }
+    vx[i] = (vx[i] + fx) * (1 - GD); vy[i] = (vy[i] + fy) * (1 - GD);
+  }
+  for (let y = 1; y < GR - 1; y++) for (let x = 1; x < GC - 1; x++) {
+    const i = y * GC + x, rx = x * GS, ry = y * GS;
+    px[i] += vx[i]; py[i] += vy[i];
+    const ox = px[i] - rx, oy = py[i] - ry, o = Math.hypot(ox, oy);
+    if (o > GMAX) { px[i] = rx + ox / o * GMAX; py[i] = ry + oy / o * GMAX; }
+  }
+}
+function drawGrid(dont) {
+  const { px, py } = grid;
+  const col = dont ? "#4A64B0" : P.grid;
+  ctx.lineCap = "butt";
+  // Rest pass: minor lines 1 px at 55%, every 4th line 1.5 px at 100%. No halo: the background never glows.
+  for (const major of [false, true]) {
+    const p = new Path2D();
+    for (let y = 0; y < GR; y++) if ((y % 4 === 0) === major) {
+      p.moveTo(px[y * GC], py[y * GC]);
+      for (let x = 1; x < GC; x++) p.lineTo(px[y * GC + x], py[y * GC + x]);
+    }
+    for (let x = 0; x < GC; x++) if ((x % 4 === 0) === major) {
+      p.moveTo(px[x], py[x]);
+      for (let y = 1; y < GR; y++) p.lineTo(px[y * GC + x], py[y * GC + x]);
+    }
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = major ? 1 : 0.55;
+    ctx.lineWidth = (major ? 1.5 : 1) * (dont ? 2 : 1);
+    ctx.stroke(p);
+  }
+  // Warp pass: displaced segments add the grid colour again (up to 2x its rest value).
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+  const off = i => Math.hypot(px[i] - (i % GC) * GS, py[i] - Math.floor(i / GC) * GS);
+  for (let y = 0; y < GR; y++) for (let x = 0; x < GC; x++) {
+    const i = y * GC + x;
+    for (const j of [x < GC - 1 ? i + 1 : -1, y < GR - 1 ? i + GC : -1]) {
+      if (j < 0) continue;
+      const d = (off(i) + off(j)) / 2;
+      if (d < 2) continue;
+      ctx.globalAlpha = Math.min(1, d / 14);
+      ctx.beginPath(); ctx.moveTo(px[i], py[i]); ctx.lineTo(px[j], py[j]); ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Particles: sparks drawn as short lines along their velocity, one additive
+// pass, no halo, alpha <= 0.8 fading linearly. Never in the danger colour.
+// ---------------------------------------------------------------------------
+const PART_CAP = 1400;      // 720p logical; ~2,000 at 1080p
+function burst(S, x, y, col, n, vMin, vMax, life) {
+  for (let i = 0; i < n && S.parts.length < PART_CAP; i++) {
+    const a = rr(0, Math.PI * 2), v = rr(vMin, vMax), l = life * rr(0.6, 1);
+    S.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: l, max: l, col });
+  }
+}
+function stepParts(S, dt) {
+  const damp = Math.pow(0.05, dt);
+  for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= damp; p.vy *= damp; p.life -= dt; }
+  S.parts = S.parts.filter(p => p.life > 0);
+}
+function drawParts(S, dont) {
+  // Sparks add on the line layer and feed the bloom at 60%, so a burst glows without hiding shots.
+  const targets = glowing ? [[ctx, 1], [BL.x, 0.6]] : [[ctx, 1]];
+  if (glowing) BL.x.setTransform(ctx.getTransform());
+  for (const [c, a] of targets) {
+    c.setLineDash([]);
+    c.globalCompositeOperation = "lighter"; c.lineCap = "round";
+    for (const p of S.parts) {
+      c.strokeStyle = p.col;
+      c.globalAlpha = a * 0.8 * (p.life / p.max);
+      c.lineWidth = dont ? 4 : 1.5;
+      c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035); c.stroke();
+    }
+    c.globalCompositeOperation = "source-over"; c.globalAlpha = 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// World drawing. Order: void, grid, particles, pickups, core, player shots,
+// enemies, player, danger (on top of every other world layer), flash, HUD.
+// ---------------------------------------------------------------------------
+function drawCore(c, scale = 1) {
+  const r = c.r * scale;
+  glowStroke(SHAPES.hex(r, c.rot), P.core, 2.5 * scale);
+  glowStroke(SHAPES.hex(r * 0.55, c.rot + Math.PI / 6), P.core, 2 * scale);
+  // Integrity: one arc segment per point of health, out of 6.
+  for (let i = 0; i < 6; i++) {
+    const a0 = -c.rot * 0.6 + i * Math.PI / 3 + 0.12, a1 = a0 + Math.PI / 3 - 0.24;
+    const p = new Path2D(); p.arc(0, 0, r * 1.38, a0, a1);
+    if (i < c.hp) glowStroke(p, P.core, 2 * scale, 0.8);
+    else { ctx.strokeStyle = rgba(P.core, 0.25); ctx.lineWidth = 1.5 * scale; ctx.stroke(p); }
+  }
+}
+// Danger shots go on top of the world bloom: first a void rim cut into the glow (on the frame),
+// then the shots in their own, tighter glow pass, so no burst or halo can swallow them.
+function drawDangerShots(list, scale = 1, spec = BLOOM.danger) {
+  if (!list.length) return;
+  const r = 5 * scale;
+  ctx.fillStyle = P.void;
+  for (const b of list) { ctx.beginPath(); ctx.arc(b.x, b.y, r + 4 * scale, 0, Math.PI * 2); ctx.fill(); }
+  beginGlow();
+  for (const b of list) {
+    const p = new Path2D(); p.arc(b.x, b.y, r, 0, Math.PI * 2);
+    glowStroke(p, P.danger, 2.5 * scale);
+    ctx.fillStyle = mix(P.danger, "#FFFFFF", 0.6);
+    ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+  }
+  endGlow(spec);
+}
+function drawHazard(h) {
+  ctx.save();
+  ctx.setLineDash([12, 9]); ctx.lineDashOffset = -h.t * 40;
+  const p = new Path2D(); p.arc(h.x, h.y, h.r, 0, Math.PI * 2);
+  glowStroke(p, P.danger, 2, 0.7);
+  ctx.restore();
+  ctx.fillStyle = rgba(P.danger, 0.06);
+  ctx.beginPath(); ctx.arc(h.x, h.y, h.r * Math.min(1, h.t / h.warn), 0, Math.PI * 2); ctx.fill();
+}
+
+function drawWorld(S, dont = false) {
+  ctx.fillStyle = dont ? "#262C44" : P.void;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(S.shakeX || 0, S.shakeY || 0);
+  if (!dont) drawGrid(false);          // the grid never glows
+  beginGlow();
+  if (dont) drawGrid(true);           // the "dont" frame: a bright, thick grid on a bright void
+  drawParts(S, dont);
+  for (const k of S.pickups) withXform(k.x, k.y, k.a, 1, () => glowStroke(SHAPES[k.kind](8), P.pickup, 2, 0.55));  // small and bright: a lighter bloom, so it stays a shape
+  withXform(S.core.x, S.core.y, 0, 1, () => drawCore(S.core));
+  // Player shots: short lines along their velocity.
+  const shots = new Path2D();
+  for (const b of S.pbul) { const v = Math.hypot(b.vx, b.vy); shots.moveTo(b.x, b.y); shots.lineTo(b.x - b.vx / v * 14, b.y - b.vy / v * 14); }
+  glowStroke(shots, P.player, 2.5, 0.8);
+  for (const e of S.enemies) {
+    const shape = dont ? "blob" : e.kind;
+    withXform(e.x, e.y, e.a, 1, () => glowStroke(SHAPES[shape](e.r), P["enemy-" + e.kind], 2.5));
+  }
+  if (S.player.alive !== false) {
+    withXform(S.player.x, S.player.y, S.player.a, 1, () => {
+      if (S.player.inv > 0 && Math.floor(S.t * 8) % 2) ctx.globalAlpha = 0.4;
+      glowStroke(SHAPES.player(16), P.player, 3, 1.3);   // the widest halo on screen is the player's
+    });
+  }
+  for (const h of S.hazards) drawHazard(h);
+  endGlow(dont ? BLOOM.dont : BLOOM.world);
+  if (dont) { beginGlow(); for (const b of S.ebul) { const p = new Path2D(); p.arc(b.x, b.y, 5, 0, Math.PI * 2); glowStroke(p, P.danger, 2.5); } endGlow(BLOOM.dont); }
+  else drawDangerShots(S.ebul);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// HUD: drawn last, in its own glow pass with a TIGHT glow (BLOOM.hud) so digits
+// stay sharp. No panels: a soft void scrim along the top edge keeps the world's
+// bloom off the numbers. Words only where a number alone would be ambiguous.
+// Smallest text 16 px at 720p (24 px at 1080p). Numbers monospace, tabular.
+// ---------------------------------------------------------------------------
+const F_BODY = '"Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
+const F_NUM = 'ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
+function text(s, x, y, size, opts = {}) {
+  ctx.font = `${opts.weight || 600} ${size}px ${opts.mono ? F_NUM : F_BODY}`;
+  ctx.fillStyle = opts.col || P["hud-ink"];
+  ctx.textAlign = opts.align || "left"; ctx.textBaseline = opts.base || "alphabetic";
+  ctx.letterSpacing = (opts.track || 0) + "px";
+  ctx.globalAlpha = opts.alpha || 1;
+  ctx.fillText(s, x, y);
+  const w = ctx.measureText(s).width;
+  ctx.globalAlpha = 1; ctx.letterSpacing = "0px";
+  return w;
+}
+function wrap(s, x, y, maxW, size, lineH, opts = {}) {
+  ctx.font = `${opts.weight || 400} ${size}px ${F_BODY}`;
+  let line = "", yy = y;
+  for (const word of s.split(" ")) {
+    const t = line ? line + " " + word : word;
+    if (ctx.measureText(t).width > maxW && line) { text(line, x, yy, size, opts); line = word; yy += lineH; }
+    else line = t;
+  }
+  if (line) text(line, x, yy, size, opts);
+  return yy + lineH;
+}
+function edgeScrim(y0, y1, a = 0.85) {          // a soft fade from the screen edge, not a box
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0, rgba(P.void, a)); g.addColorStop(1, rgba(P.void, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, Math.min(y0, y1), W, Math.abs(y1 - y0));
+}
+function lifeIcon(x, y, r) {                      // the player's own shape, pointing up
+  withXform(x, y, -Math.PI / 2, 1, () => { ctx.strokeStyle = P.player; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke(SHAPES.player(r)); });
+}
+function drawHud(S, dont = false) {
+  if (!dont) edgeScrim(0, 112);
+  beginGlow();
+  const sw = text(S.score.toLocaleString("en-US"), 28, 56, 36, { mono: true, weight: 700 });
+  text("×" + S.mult, 28 + sw + 16, 56, 24, { mono: true, weight: 700, alpha: 0.8 });
+  for (let i = 0; i < S.lives; i++) lifeIcon(38 + i * 26, 84, 9);
+  const ww = text(String(S.wave).padStart(2, "0"), W - 28, 56, 36, { mono: true, weight: 700, align: "right" });
+  text("WAVE", W - 28 - ww - 12, 56, 16, { weight: 700, align: "right", alpha: 0.65, track: 2 });
+  if (dont) { // the "dont" frame: a boxed HUD under the same heavy bloom as the world
+    ctx.strokeStyle = P["hud-ink"]; ctx.lineWidth = 3; ctx.strokeRect(16, 14, 420, 88); ctx.strokeRect(W - 216, 14, 200, 88);
+  }
+  endGlow(dont ? BLOOM.dont : BLOOM.hud, "line");
+}
+
+// Key prompt glyph: a small vector keycap with its key, then the verb.
+function keycap(x, y, key, verb) {
+  ctx.font = `700 16px ${F_NUM}`;
+  const kw = Math.max(26, ctx.measureText(key).width + 14);
+  ctx.strokeStyle = rgba(P["hud-ink"], 0.7); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x + 4, y); ctx.lineTo(x + kw - 4, y); ctx.lineTo(x + kw, y + 4); ctx.lineTo(x + kw, y + 22);
+  ctx.lineTo(x + kw - 4, y + 26); ctx.lineTo(x + 4, y + 26); ctx.lineTo(x, y + 22); ctx.lineTo(x, y + 4); ctx.closePath(); ctx.stroke();
+  text(key, x + kw / 2, y + 19, 16, { mono: true, weight: 700, align: "center" });
+  if (!verb) return x + kw + 6;
+  const vw = text(verb, x + kw + 10, y + 19, 16, { weight: 700, alpha: 0.7, track: 2 });
+  return x + kw + 10 + vw + 28;
+}
+
+// ---------------------------------------------------------------------------
+// Frames (deterministic): build a frozen moment of a fight.
+// ---------------------------------------------------------------------------
+function newState() {
+  return { t: 0, score: 0, mult: 1, lives: 3, wave: 1,
+    core: { x: W / 2, y: H / 2 + 20, r: 46, hp: 6, rot: 0 },
+    player: { x: W / 2 - 200, y: H / 2, a: 0, inv: 0 },
+    enemies: [], pbul: [], ebul: [], pickups: [], parts: [], hazards: [],
+    shake: 0, shakeX: 0, shakeY: 0, flash: 0, flashes: [] };
+}
+function keyScene() {
+  rng = mulberry32(7);
+  gridReset();
+  const S = newState();
+  S.score = 1284350; S.mult = 24; S.lives = 3; S.wave = 7; S.core.hp = 4; S.core.rot = 0.35;
+  S.player.x = 470; S.player.y = 420; S.player.a = -0.32;
+  const E = (kind, x, y, r, a) => S.enemies.push({ kind, x, y, r, a });
+  E("seeker", 905, 214, 17, Math.PI * 0.85); E("seeker", 980, 470, 17, Math.PI * 1.05);
+  E("seeker", 300, 220, 17, 0.6); E("seeker", 1110, 330, 17, Math.PI);
+  E("seeker", 640, 610, 17, -Math.PI / 2);
+  E("splitter", 745, 168, 22, 0.2); E("splitter", 1040, 590, 22, 1.1); E("splitter", 220, 560, 22, 0.4);
+  E("warden", 1130, 150, 21, 0); E("warden", 160, 330, 21, 0);
+  // Stream of player shots toward the kill site.
+  for (let i = 0; i < 7; i++) {
+    const d = 40 + i * 52, a = S.player.a + rr(-0.03, 0.03);
+    S.pbul.push({ x: S.player.x + Math.cos(a) * d, y: S.player.y + Math.sin(a) * d, vx: Math.cos(a) * 900, vy: Math.sin(a) * 900 });
+  }
+  S.ebul.push({ x: 1046, y: 186 }, { x: 960, y: 228 }, { x: 600, y: 470 }, { x: 236, y: 360 }, { x: 330, y: 392 });
+  S.hazards.push({ x: 1000, y: 470, r: 70, t: 0.9, warn: 1.5 });
+  S.pickups.push({ kind: "shard", x: 828, y: 340, a: 0 }, { kind: "shard", x: 860, y: 300, a: 0 },
+    { kind: "multiplier", x: 790, y: 286, a: 0.3 }, { kind: "shard", x: 880, y: 360, a: 0 },
+    { kind: "shield", x: 560, y: 300, a: 0 });
+  // A splitter just died at (830, 300); a seeker died a moment earlier at (700, 520).
+  gridImpulse(700, 520, 8, 160);
+  burst(S, 700, 520, P["enemy-seeker"], 40, 120, 420, 0.7);
+  for (let i = 0; i < 10; i++) { gridStep(); stepParts(S, 1 / 60); }
+  gridImpulse(830, 300, 12, 220);
+  burst(S, 830, 300, P["enemy-splitter"], 110, 160, 560, 0.9);
+  burst(S, 830, 300, mix(P["enemy-splitter"], "#FFFFFF", 0.5), 20, 60, 200, 0.5);
+  for (let i = 0; i < 6; i++) { gridStep(); stepParts(S, 1 / 60); }
+  return S;
+}
+
+function frameKey() { const S = keyScene(); drawWorld(S); drawHud(S); }
+
+function frameDont() {
+  const S = keyScene();
+  burst(S, 830, 300, P.danger, 160, 100, 600, 0.9);      // debris in the danger colour
+  burst(S, 700, 520, P["enemy-warden"], 200, 100, 600, 0.9);
+  drawWorld(S, true);                                     // bright void, blooming grid, colour-only blobs
+  drawHud(S, true);                                       // boxed HUD under the same heavy bloom
+}
+
+// Character: the attract-mode roster, as the game itself would show it between runs.
+function frameCharacter() {
+  rng = mulberry32(7); gridReset();
+  const S = newState();
+  gridImpulse(200, 340, 10, 220); for (let i = 0; i < 8; i++) gridStep();
+  ctx.fillStyle = P.void; ctx.fillRect(0, 0, W, H);
+  drawGrid(false);
+  const cells = [
+    { kind: "player", x: 200, col: P.player, a: -Math.PI / 2, r: 92, w: 6, k: 1.3 },
+    { kind: "seeker", x: 500, col: P["enemy-seeker"], a: -Math.PI / 2, r: 76, w: 5.5, k: 1, pts: "100" },
+    { kind: "splitter", x: 780, col: P["enemy-splitter"], a: 0, r: 80, w: 5.5, k: 1, pts: "250" },
+    { kind: "warden", x: 1060, col: P["enemy-warden"], a: 0, r: 66, w: 5.5, k: 1, pts: "500" },
+  ];
+  burst(S, 200, 450, P.player, 60, 60, 300, 0.5);       // thrust behind the player
+  for (let i = 0; i < 8; i++) stepParts(S, 1 / 60);
+  beginGlow();
+  drawParts(S);
+  for (const c of cells) withXform(c.x, 330, c.a, 1, () => glowStroke(SHAPES[c.kind](c.r), c.col, c.w, c.k));
+  endGlow(BLOOM.world);
+  drawDangerShots([{ x: 1195, y: 300 }, { x: 1230, y: 372 }], 1.6);
+  edgeScrim(H, H - 230, 0.6);
+  beginGlow();
+  text("YOU", 200, 530, 24, { weight: 700, align: "center", track: 4 });
+  for (const c of cells) if (c.pts) {
+    text(KIND_INFO[c.kind].name, c.x, 530, 24, { weight: 700, align: "center", track: 4 });
+    text(c.pts, c.x, 566, 24, { mono: true, weight: 700, align: "center", alpha: 0.7 });
+  }
+  endGlow(BLOOM.hud, "line");
+}
+
+// Prop: the core and the pickups, in the same roster layout.
+function frameProp() {
+  rng = mulberry32(7); gridReset();
+  gridImpulse(400, 330, 10, 240); for (let i = 0; i < 8; i++) gridStep();
+  ctx.fillStyle = P.void; ctx.fillRect(0, 0, W, H);
+  drawGrid(false);
+  const S = newState();
+  burst(S, 860, 170, P.pickup, 22, 60, 220, 0.3);
+  for (let i = 0; i < 6; i++) stepParts(S, 1 / 60);
+  const kinds = [["shard", "+50"], ["multiplier", "×+1"], ["shield", "+1"]];
+  beginGlow();
+  drawParts(S);
+  withXform(400, 330, 0, 1, () => drawCore({ r: 60, rot: 0.3, hp: 4 }, 2));   // r 120, widths x2
+  kinds.forEach(([k], i) => withXform(860, 170 + i * 180, 0, 1, () => glowStroke(SHAPES[k](42), P.pickup, 5, 0.9)));
+  endGlow(BLOOM.world);
+  beginGlow();
+  text("CORE", 400, 600, 24, { weight: 700, align: "center", track: 4 });
+  kinds.forEach(([k, v], i) => {
+    const y = 170 + i * 180;
+    text(PICKUP_INFO[k].name, 940, y - 4, 24, { weight: 700, track: 4 });
+    const vw = text(v, 940, y + 30, 24, { mono: true, weight: 700, alpha: 0.7 });
+    if (k === "shield") withXform(940 + vw + 22, y + 22, 0, 1, () => { ctx.strokeStyle = P.core; ctx.lineWidth = 2; ctx.stroke(SHAPES.hex(10)); });
+  });
+  endGlow(BLOOM.hud, "line");
+}
+
+// Text-heavy: the worst case of the game's own text, a wave banner over an upgrade choice.
+const UPGRADE_ICONS = {
+  lance(r) {      // three chevrons in a line: piercing shots
+    const p = new Path2D();
+    for (let i = -1; i <= 1; i++) { const x = i * r * 0.6; p.moveTo(x - r * 0.25, -r * 0.5); p.lineTo(x + r * 0.25, 0); p.lineTo(x - r * 0.25, r * 0.5); }
+    return p;
+  },
+  mirror(r) {     // the core's hexagon with rays bursting out of it
+    const p = SHAPES.hex(r * 0.45);
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + Math.PI / 6; p.moveTo(Math.cos(a) * r * 0.65, Math.sin(a) * r * 0.65); p.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    return p;
+  },
+  magnet(r) {     // a horseshoe pulling a shard
+    const p = new Path2D();
+    p.moveTo(-r * 0.55, -r * 0.7); p.lineTo(-r * 0.55, 0); p.arc(0, 0, r * 0.55, Math.PI, 0, true); p.lineTo(r * 0.55, -r * 0.7);
+    p.moveTo(r * 0.12, -r * 0.62); p.arc(0, -r * 0.62, r * 0.12, 0, Math.PI * 2);
+    return p;
+  },
+};
+function cutFrame(x, y, w, h, c) {   // a vector frame with cut corners
+  const p = new Path2D();
+  p.moveTo(x + c, y); p.lineTo(x + w - c, y); p.lineTo(x + w, y + c); p.lineTo(x + w, y + h - c);
+  p.lineTo(x + w - c, y + h); p.lineTo(x + c, y + h); p.lineTo(x, y + h - c); p.lineTo(x, y + c); p.closePath();
+  return p;
+}
+function frameText() {
+  const S = keyScene();
+  S.score = 12843509120; S.mult = 128; S.lives = 5; S.wave = 12;
+  drawWorld(S);
+  ctx.fillStyle = rgba(P.void, 0.74); ctx.fillRect(0, 0, W, H);   // the fight dims behind a choice
+  drawHud(S);
+  const cards = [
+    ["lance", "ARC LANCE", "Shots pierce three enemies and leave a trail that burns for 1.5 s."],
+    ["mirror", "CORE MIRROR", "Once a wave, an enemy that reaches the core becomes a shockwave that wipes nearby red shots."],
+    ["magnet", "SHARD MAGNET", "Shards fly to you from twice as far, and every tenth one adds ×1."],
+  ];
+  const cw = 340, ch = 330, gap = 30, x0 = (W - 3 * cw - 2 * gap) / 2, y0 = 214, focus = 1;
+  // Card fills on the frame first (dark glass), then all lines and text in one tight glow pass.
+  cards.forEach((c, i) => { ctx.fillStyle = rgba(P.void, 0.9); ctx.fill(cutFrame(x0 + i * (cw + gap), y0, cw, ch, 18)); });
+  beginGlow();
+  text("WAVE 12", W / 2, 150, 48, { weight: 800, align: "center", track: 6 });
+  text("THE SWARM SPLITS", W / 2, 184, 18, { weight: 700, align: "center", track: 5, alpha: 0.7 });
+  cards.forEach(([ic, name, desc], i) => {
+    const x = x0 + i * (cw + gap), y = y0, f = i === focus;
+    ctx.strokeStyle = rgba(P["hud-ink"], f ? 1 : 0.35); ctx.lineWidth = f ? 2 : 1.5;
+    ctx.stroke(cutFrame(x, y, cw, ch, 18));
+    if (f) { // focus: corner brackets 10 px outside the frame
+      const o = 10, Lb = 30; ctx.lineWidth = 3; ctx.strokeStyle = P["hud-ink"];
+      for (const [cx, cy, sx, sy] of [[x - o, y - o, 1, 1], [x + cw + o, y - o, -1, 1], [x - o, y + ch + o, 1, -1], [x + cw + o, y + ch + o, -1, -1]]) {
+        ctx.beginPath(); ctx.moveTo(cx + sx * Lb, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * Lb); ctx.stroke();
+      }
+    }
+    keycap(x + 18, y + 18, String(i + 1));
+    withXform(x + cw / 2, y + 82, 0, 1, () => { ctx.strokeStyle = P["hud-ink"]; ctx.globalAlpha = f ? 1 : 0.75; ctx.lineWidth = 3; ctx.lineJoin = ctx.lineCap = "round"; ctx.stroke(UPGRADE_ICONS[ic](34)); ctx.globalAlpha = 1; });
+    text(name, x + cw / 2, y + 160, 24, { weight: 800, align: "center", track: 3, alpha: f ? 1 : 0.8 });
+    wrap(desc, x + 26, y + 198, cw - 52, 18, 26, { weight: 400, alpha: f ? 0.95 : 0.7 });
+    for (let k = 0; k < 3; k++) {   // level pips: 1 of 3
+      const px = x + cw / 2 + (k - 1) * 22, py = y + ch - 26, p = new Path2D();
+      p.moveTo(px, py - 6); p.lineTo(px + 6, py); p.lineTo(px, py + 6); p.lineTo(px - 6, py); p.closePath();
+      ctx.strokeStyle = rgba(P["hud-ink"], 0.8); ctx.lineWidth = 1.5; ctx.stroke(p);
+      if (k === 0) { ctx.fillStyle = P["hud-ink"]; ctx.fill(p); }
+    }
+  });
+  let kx = W / 2 - 200;
+  kx = keycap(kx, 600, "1"); kx = keycap(kx, 600, "2"); kx = keycap(kx, 600, "3", "CHOOSE");
+  keycap(kx, 600, "ESC", "PAUSE");
+  endGlow(BLOOM.hud, "line");
+}
+
+// ---------------------------------------------------------------------------
+// Live mode: a small, self-running fight. ~10 fps when idle, full rate only
+// while the user interacts, paused while the tab is hidden.
+// ---------------------------------------------------------------------------
+let S = null;
+const input = { keys: {}, mouse: null, lastMouse: -1e9 };
+let reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let reducedFlash = reducedMotion;
+
+function killEnemy(e) {
+  const big = e.kind === "warden" ? 90 : e.kind === "splitter" ? 56 : 32;
+  burst(S, e.x, e.y, P["enemy-" + e.kind], big, 120, 480, 0.7);
+  burst(S, e.x, e.y, mix(P["enemy-" + e.kind], "#FFFFFF", 0.5), Math.round(big / 6), 40, 180, 0.4);
+  gridImpulse(e.x, e.y, (e.kind === "warden" ? 12 : 8) * (reducedMotion ? 0.3 : 1), e.kind === "warden" ? 220 : 160);
+  addShake(e.kind === "warden" ? 3 : 1.5);
+  S.score += 100 * S.mult;
+  if (e.kind === "splitter" && e.r > 14) {
+    for (let i = 0; i < 3; i++) { const a = i * 2.094; S.enemies.push({ kind: "splitter", x: e.x + Math.cos(a) * 14, y: e.y + Math.sin(a) * 14, r: 12, a: 0, spin: 2 }); }
+  }
+  if (rng() < 0.6) {
+    const r = rng(), kind = r < 0.75 ? "shard" : r < 0.92 ? "multiplier" : "shield";
+    S.pickups.push({ kind, x: e.x, y: e.y, a: 0, life: 8 });
+  }
+}
+function addShake(px) { if (!reducedMotion) S.shake = Math.min(5.3, S.shake + px); }   // 8 px at 1080p
+function requestFlash(alpha) {
+  const now = S.t;
+  S.flashes = S.flashes.filter(t => now - t < 1);
+  if (reducedFlash || S.flashes.length >= 3) return false;  // at most 3 full-screen flashes per second
+  S.flashes.push(now); S.flash = Math.min(0.15, alpha);
+  return true;
+}
+function spawnEnemy() {
+  const side = Math.floor(rng() * 4);
+  const x = side === 0 ? -20 : side === 1 ? W + 20 : rr(0, W);
+  const y = side === 2 ? -20 : side === 3 ? H + 20 : rr(0, H);
+  const r = rng(), kind = r < 0.5 ? "seeker" : r < 0.8 ? "splitter" : "warden";
+  S.enemies.push({ kind, x, y, r: kind === "seeker" ? 17 : kind === "splitter" ? 22 : 21, a: 0, spin: rr(-1.5, 1.5), cd: rr(1, 2.5) });
+}
+function hitPlayer() {
+  const p = S.player;
+  if (p.inv > 0) return;
+  burst(S, p.x, p.y, P.player, 220, 80, 520, 1.2);
+  gridImpulse(p.x, p.y, 16 * (reducedMotion ? 0.3 : 1), 280);
+  addShake(5.3); requestFlash(0.12);
+  S.lives -= 1; if (S.lives <= 0) { S.lives = 3; S.score = 0; S.mult = 1; }
+  p.inv = 2;
+}
+function update(dt) {
+  S.t += dt;
+  const p = S.player, c = S.core;
+  c.rot += dt * 0.4;
+  // Player: keys, then mouse, then an autopilot orbit.
+  let mx = (input.keys.d || input.keys.arrowright ? 1 : 0) - (input.keys.a || input.keys.arrowleft ? 1 : 0);
+  let my = (input.keys.s || input.keys.arrowdown ? 1 : 0) - (input.keys.w || input.keys.arrowup ? 1 : 0);
+  let tx, ty;
+  if (mx || my) { const l = Math.hypot(mx, my); tx = p.x + mx / l * 60; ty = p.y + my / l * 60; }
+  else if (input.mouse && performance.now() - input.lastMouse < 3000) { tx = input.mouse.x; ty = input.mouse.y; }
+  else { const a = S.t * 0.6; tx = c.x + Math.cos(a) * 180; ty = c.y + Math.sin(a) * 150; }
+  const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy), sp = Math.min(d, 420 * dt);
+  if (d > 0.5) { p.x += dx / d * sp; p.y += dy / d * sp; }
+  p.inv = Math.max(0, p.inv - dt);
+  // Aim at the nearest enemy and fire.
+  let best = null, bd = 1e9;
+  for (const e of S.enemies) { const q = Math.hypot(e.x - p.x, e.y - p.y); if (q < bd) { bd = q; best = e; } }
+  if (best) p.a = Math.atan2(best.y - p.y, best.x - p.x);
+  S.fire = (S.fire || 0) - dt;
+  if (best && S.fire <= 0) {
+    S.fire = 0.09; const a = p.a + rr(-0.03, 0.03);
+    S.pbul.push({ x: p.x + Math.cos(a) * 18, y: p.y + Math.sin(a) * 18, vx: Math.cos(a) * 900, vy: Math.sin(a) * 900 });
+  }
+  // Spawning.
+  S.spawn = (S.spawn || 0) - dt;
+  if (S.spawn <= 0 && S.enemies.length < 40) { S.spawn = 0.6; spawnEnemy(); }
+  S.hz = (S.hz || 4) - dt;
+  if (S.hz <= 0) { S.hz = 6; S.hazards.push({ x: rr(150, W - 150), y: rr(150, H - 150), r: 70, t: 0, warn: 1.5 }); }
+  // Enemies.
+  for (const e of S.enemies) {
+    const goal = e.kind === "seeker" ? p : c;
+    const v = e.kind === "seeker" ? 130 : e.kind === "splitter" ? 70 : 45;
+    const gx = goal.x - e.x, gy = goal.y - e.y, gd = Math.hypot(gx, gy) || 1;
+    const wob = e.kind === "splitter" ? Math.sin(S.t * 3 + e.x * 0.01) * 0.6 : 0;
+    const h = Math.atan2(gy, gx) + wob;
+    e.x += Math.cos(h) * v * dt; e.y += Math.sin(h) * v * dt;
+    e.a = e.kind === "seeker" ? h : e.a + (e.spin || 0.8) * dt;
+    if (e.kind === "warden") {
+      e.cd -= dt;
+      if (e.cd <= 0) { e.cd = 2.2; const a = Math.atan2(p.y - e.y, p.x - e.x); S.ebul.push({ x: e.x, y: e.y, vx: Math.cos(a) * 220, vy: Math.sin(a) * 220 }); }
+    }
+  }
+  // Shots.
+  for (const b of S.pbul) { b.x += b.vx * dt; b.y += b.vy * dt; }
+  for (const b of S.ebul) { b.x += b.vx * dt; b.y += b.vy * dt; }
+  const inside = b => b.x > -30 && b.x < W + 30 && b.y > -30 && b.y < H + 30;
+  for (const b of S.pbul) for (const e of S.enemies) {
+    if (!e.dead && !b.dead && Math.hypot(b.x - e.x, b.y - e.y) < e.r + 4) {
+      b.dead = true; e.dead = true; killEnemy(e);
+      burst(S, b.x, b.y, P.player, 5, 60, 200, 0.15);
+    }
+  }
+  for (const e of S.enemies) {
+    if (e.dead) continue;
+    if (Math.hypot(e.x - c.x, e.y - c.y) < c.r + e.r) {
+      e.dead = true; burst(S, e.x, e.y, P["enemy-" + e.kind], 40, 100, 400, 0.6);
+      gridImpulse(e.x, e.y, 12 * (reducedMotion ? 0.3 : 1), 220);
+      c.hp -= 1; if (c.hp <= 0) c.hp = 6;
+      addShake(4); requestFlash(0.1);
+    } else if (Math.hypot(e.x - p.x, e.y - p.y) < 12 + e.r) hitPlayer();
+  }
+  for (const b of S.ebul) if (!b.dead && Math.hypot(b.x - p.x, b.y - p.y) < 14) { b.dead = true; hitPlayer(); }
+  // Hazards: telegraph 1.5 s, then pulse.
+  for (const hz of S.hazards) {
+    hz.t += dt;
+    if (hz.t >= hz.warn && !hz.dead) {
+      hz.dead = true;
+      burst(S, hz.x, hz.y, mix(P["hud-ink"], P.void, 0.3), 40, 100, 300, 0.4);   // debris never in the danger colour
+      gridImpulse(hz.x, hz.y, -10 * (reducedMotion ? 0.3 : 1), 180);
+      if (Math.hypot(hz.x - p.x, hz.y - p.y) < hz.r) hitPlayer();
+    }
+  }
+  // Pickups.
+  for (const k of S.pickups) {
+    k.life -= dt; k.a += dt;
+    const q = Math.hypot(p.x - k.x, p.y - k.y);
+    if (q < 120) { k.x += (p.x - k.x) / q * 300 * dt; k.y += (p.y - k.y) / q * 300 * dt; }
+    if (q < 20) {
+      k.dead = true; burst(S, k.x, k.y, P.pickup, 12, 60, 200, 0.25);
+      if (k.kind === "shard") { S.score += 50 * S.mult; S.shards = (S.shards || 0) + 1; if (S.shards % 10 === 0) S.mult++; }
+      else if (k.kind === "multiplier") S.mult++;
+      else c.hp = Math.min(6, c.hp + 1);
+    }
+  }
+  S.enemies = S.enemies.filter(e => !e.dead);
+  S.pbul = S.pbul.filter(b => !b.dead && inside(b));
+  S.ebul = S.ebul.filter(b => !b.dead && inside(b));
+  S.pickups = S.pickups.filter(k => !k.dead && k.life > 0);
+  S.hazards = S.hazards.filter(h => !h.dead);
+  S.wave = 1 + Math.floor(S.t / 30);
+  stepParts(S, dt);
+  // Grid in fixed 1/60 s steps.
+  S.gacc = (S.gacc || 0) + dt;
+  let n = 0; while (S.gacc >= 1 / 60 && n < 6) { gridStep(); S.gacc -= 1 / 60; n++; }
+  if (n === 6) S.gacc = 0;
+  // Shake: decays to zero in 0.25 s, translation only.
+  S.shake = Math.max(0, S.shake - dt * 5.3 / 0.25);
+  S.shakeX = (rng() * 2 - 1) * S.shake; S.shakeY = (rng() * 2 - 1) * S.shake;
+  S.flash = Math.max(0, S.flash - dt * 1.5);
+}
+function renderLive() {
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  drawWorld(S);
+  if (S.flash > 0) { ctx.fillStyle = rgba(P["hud-ink"], S.flash); ctx.fillRect(0, 0, W, H); }
+  drawHud(S);
+}
+
+let last = 0, lastInput = -1e9, rafId = 0, timerId = 0;
+function tick(now) {
+  rafId = 0; timerId = 0;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  update(dt); renderLive(); schedule();
+}
+function schedule() {
+  if (document.hidden || rafId || timerId) return;
+  if (performance.now() - lastInput < 2000) rafId = requestAnimationFrame(tick);
+  else timerId = setTimeout(() => tick(performance.now()), 100);   // ~10 fps when idle
+}
+function poke() {
+  lastInput = performance.now();
+  if (timerId) { clearTimeout(timerId); timerId = 0; schedule(); }
+}
+function buildUi() {
+  const ui = document.getElementById("ui");
+  const btns = [];
+  for (const [id, pal] of Object.entries(PALETTES)) {
+    const b = document.createElement("button");
+    b.textContent = pal.label; b.setAttribute("aria-pressed", id === palName);
+    b.onclick = () => { palName = id; P = PALETTES[id]; btns.forEach(x => x.setAttribute("aria-pressed", x === b)); };
+    btns.push(b); ui.appendChild(b);
+  }
+  const toggle = (label, get, set) => {
+    const b = document.createElement("button"); b.textContent = label; b.setAttribute("aria-pressed", get());
+    b.onclick = () => { set(!get()); b.setAttribute("aria-pressed", get()); }; ui.appendChild(b);
+  };
+  toggle("Reduced flash", () => reducedFlash, v => reducedFlash = v);
+  toggle("Reduced motion", () => reducedMotion, v => { reducedMotion = v; if (v) S.shake = 0; });
+}
+
+// ---------------------------------------------------------------------------
+// Entry.
+// ---------------------------------------------------------------------------
+const FRAMES = { "key-scene": frameKey, character: frameCharacter, prop: frameProp, "text-heavy": frameText, dont: frameDont };
+if (FRAME && FRAMES[FRAME]) {
+  document.body.classList.add("frame");
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  FRAMES[FRAME]();
+  requestAnimationFrame(() => { document.title = "ready"; });
+} else {
+  S = newState();
+  for (let i = 0; i < 6; i++) spawnEnemy();
+  buildUi();
+  addEventListener("resize", fit);
+  addEventListener("keydown", e => { input.keys[e.key.toLowerCase()] = true; poke(); });
+  addEventListener("keyup", e => { input.keys[e.key.toLowerCase()] = false; });
+  addEventListener("pointermove", e => {
+    const r = cv.getBoundingClientRect();
+    input.mouse = { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+    input.lastMouse = performance.now(); poke();
+  });
+  addEventListener("pointerdown", poke);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { cancelAnimationFrame(rafId); clearTimeout(timerId); rafId = 0; timerId = 0; }
+    else { last = performance.now(); schedule(); }
+  });
+  last = performance.now();
+  schedule();
+}
+</script>
+</body>
+</html>

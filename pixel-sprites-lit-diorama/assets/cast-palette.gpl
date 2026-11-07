@@ -1,0 +1,28 @@
+GIMP Palette
+Name: pixel-sprites-lit-diorama - cast and sign cleanup (day)
+Columns: 2
+# The sprite roles of example-palette.gpl plus the set roles signs use, each with its shade (x 0.72, recipe.md).
+# PixelForge snaps generated sprites and signs onto these; demo.html maps each colour back to its role to repaint it.
+ 34  28  36	outline
+224 168 130	sprite-skin
+161 121  94	sprite-skin shade
+ 74  48  32	sprite-hair
+ 53  35  23	sprite-hair shade
+208  72  60	sprite-cloth-a
+150  52  43	sprite-cloth-a shade
+ 60 120 200	sprite-cloth-b
+ 43  86 144	sprite-cloth-b shade
+237 230 214	sprite-cloth-c
+171 166 154	sprite-cloth-c shade
+138 100  72	material-wood
+ 99  72  52	material-wood shade
+191 160  96	material-cloth2
+138 115  69	material-cloth2 shade
+176 112  82	material-roof
+127  81  59	material-roof shade
+110 148  80	material-leaf
+ 79 107  58	material-leaf shade
+200 184 160	material-plaster
+144 132 115	material-plaster shade
+154 150 140	material-stone
+111 108 101	material-stone shade

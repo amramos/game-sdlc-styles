@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tabletop diorama demo</title>
+<style>
+  :root { --paper:#F4ECD8; --ink:#2B2118; --room:#D9CDB8; --room-a:rgba(217,205,184,.75); --accent:#E8308C; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--room); }
+  body { font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif; color:var(--ink); }
+  canvas#c { display:block; position:fixed; left:0; top:0; }
+  /* frame mode: a fixed 1280x720 canvas pinned to the page's top-left, whatever the viewport */
+  body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
+
+  /* demo controls (hidden in frame mode) */
+  #controls { position:fixed; right:12px; bottom:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; z-index:5; }
+  #controls label, #controls button, #controls select {
+    font:inherit; font-size:16px; color:var(--ink); background:var(--paper); border:0; border-radius:4px;
+    padding:6px 10px; box-shadow:0 3px 8px rgba(0,0,0,.3); cursor:pointer;
+  }
+  #controls button[aria-pressed="true"] { outline:3px solid var(--accent); outline-offset:-3px; }
+  body.frame #controls { display:none; }
+
+  /* interface: paper cards in a 1280x720 box, scaled to fit outside frame mode */
+  #hud { position:fixed; left:0; top:0; width:1280px; height:720px; transform-origin:0 0; pointer-events:none; display:none; }
+  #hud.on { display:block; }
+  body.frame #hud { transform:none !important; }
+  #hud .busy { display:none; }
+  #hud.busy .busy { display:block; }
+  #hud.busy span.busy, #hud.busy b.busy { display:inline; }
+  .card { position:absolute; box-sizing:border-box; background:var(--paper); color:var(--ink); padding:12px 16px; border-radius:2px;
+          box-shadow:0 4px 12px rgba(0,0,0,.3); line-height:1.32; font-size:18px; }
+  .card h3 { margin:0 0 6px; font-size:20px; font-weight:normal; font-variant:small-caps; letter-spacing:.03em; line-height:1.2; }
+  .card p { margin:0 0 6px; }
+  .meta { font-size:16px; }
+  .stamp { display:inline-block; font-size:16px; font-variant:small-caps; letter-spacing:.04em; border:2px solid currentColor;
+           padding:0 7px; border-radius:3px; margin:4px 6px 0 0; transform:rotate(-2deg); }
+  .warn { color:var(--signal-warn); } .ok { color:var(--signal-ok); }
+  /* layout at worst-case content: left column 20-340, centre 360-880, right column 920-1260; nothing overlaps */
+  .day { left:20px; top:18px; width:320px; transform:rotate(-1.4deg); }
+  .orders { left:20px; top:196px; width:320px; transform:rotate(0.8deg); padding-top:10px; }
+  .orders ol { list-style:none; margin:0; padding:0; }
+  .orders li { margin:0 0 6px; font-size:16px; line-height:1.3; }
+  .orders li .m { display:block; font-size:16px; font-style:italic; }
+  .piece { left:920px; top:18px; width:340px; transform:rotate(1.6deg); }
+  .piece h3 { font-size:22px; }
+  .piece .por { float:left; width:62px; height:62px; margin:2px 12px 4px 0; border-radius:50%;
+                background:radial-gradient(circle at 50% 38%, var(--wood-bare) 0 30%, var(--paint-blue) 31% 100%); box-shadow:inset 0 0 0 3px var(--paint-cream); }
+  .piece ul { list-style:none; margin:4px 0 6px; padding:0; font-size:16px; clear:both; }
+  .spoken { left:360px; top:18px; width:520px; text-align:center; font-size:24px; line-height:1.36; padding:10px 20px; transform:rotate(-0.5deg); }
+  body.dark-room .spoken { background:radial-gradient(closest-side, var(--room-a), transparent); color:var(--paper); box-shadow:none; padding:18px 30px; }
+  .choices { left:360px; top:585px; width:520px; font-size:19px; font-style:italic; transform:rotate(0.5deg); padding:10px 20px; }
+  .choices div { margin:0 0 2px; text-decoration:underline dotted; text-underline-offset:4px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<!-- Meshy models, stripped to geometry and kept as base64 so the page runs from file:// (see assets/README.md) -->
+<script src="assets/images.js"></script>  <!-- images embedded so WebGL accepts them from file:// -->
+<script src="assets/bakery.glb.js"></script>
+<script src="assets/baker.glb.js"></script>
+<script src="assets/cart.glb.js"></script>
+<script src="assets/stall.glb.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <label>Lighting <select id="mood"></select></label>
+  <button id="bTable" aria-pressed="true">Tabletop</button>
+  <button id="bIso" aria-pressed="false">Isometric</button>
+  <button id="bTilt" aria-pressed="true">Tilt-shift</button>
+  <button id="bBusy" aria-pressed="false">Busiest screen</button>
+</div>
+
+<div id="hud">
+  <div class="card day">
+    <h3>Day 12 · 5:40 in the morning</h3>
+    <div class="meta">Three orders before the market bell<span class="busy"> · Coins 1,284 · Flour 42 of 60 sacks · Oven 230° of 240°</span></div>
+  </div>
+  <div class="card spoken">The first loaves are out. Which cart goes up the hill before the bell?</div>
+
+  <div class="card orders busy">
+    <h3>Orders before the bell</h3>
+    <ol>
+      <li>Three dozen honey-glazed cardamom knots for the wedding breakfast at the mill house<span class="m">36 · due 7:00 · <b class="warn">late soon</b></span></li>
+      <li>Seeded rye, sliced thin, for the schoolhouse kitchen<span class="m">12 · due 8:30</span></li>
+      <li>Two cinnamon wreaths with extra icing and candied peel<span class="m">2 · due 9:00</span></li>
+      <li>Plain white loaves for the night watch at the bridge<span class="m">20 · due 9:15</span></li>
+      <li>A birthday cake shaped like a carriage, lemon and poppy seed<span class="m">1 · due at noon</span></li>
+      <li>Sourdough starter in a jar, to be returned clean<span class="m">1 · due at noon · <b class="ok">ready</b></span></li>
+    </ol>
+  </div>
+  <div class="card piece busy">
+    <div class="por"></div>
+    <h3>Rosalind Achterberg-Okonkwo, the night baker</h3>
+    <div class="meta">Carved in limewood, painted twice</div>
+    <ul>
+      <li>Kneading 4 · Shaping 3 · Oven 5</li>
+      <li>Carrying a peel and two seeded rye loaves</li>
+    </ul>
+    <p class="meta">Works best by the big oven. After the third batch she tires, and the next bake takes twice as long unless she rests at the bench first.</p>
+    <span class="stamp warn">tired</span><span class="stamp ok">oven ready</span><span class="stamp ok">cart loaded</span>
+  </div>
+  <div class="card choices busy">
+    <div>Send the night baker up the hill, flour and all.</div>
+    <div>Wait for the morning cart and risk the wedding order.</div>
+    <div>Pay the neighbour's child two honey knots to run it.</div>
+  </div>
+</div>
+
+<!-- Palettes, one per lighting scheme: every one fills the same roles and passes style.md's colour-rules.
+     "sunny" is example-palette.gpl. -->
+<script type="application/json" id="palettes">
+{
+ "sunny": {"label":"Sunny kitchen","room":"#D9CDB8","table":"#A47E58","wood-bare":"#E6CFA6","paint-red":"#C2452F","paint-ochre":"#D4A24A","paint-blue":"#3E6E9E","paint-green":"#5E8C4A","paint-cream":"#E8DAB8","paint-brown":"#7A4E2E","key":"#FFF1D6","fill":"#B8CCE0","paper":"#F4ECD8","ink":"#2B2118","signal-warn":"#A3261A","signal-ok":"#2F5D34","accent":"#E8308C"},
+ "candle": {"label":"Evening candlelight","room":"#070504","table":"#4A3322","wood-bare":"#C9A979","paint-red":"#9E3A28","paint-ochre":"#C08A3A","paint-blue":"#2F5A70","paint-green":"#4F6B3A","paint-cream":"#DCCBA6","paint-brown":"#6A4428","key":"#FFCB94","fill":"#3A4050","paper":"#E8DCC0","ink":"#2A1E14","signal-warn":"#8A2416","signal-ok":"#2E5530","accent":"#3FE0B0"},
+ "morning": {"label":"Cool morning window","room":"#77838F","table":"#B09A7A","wood-bare":"#EAD9BB","paint-red":"#B5503F","paint-ochre":"#E0B85C","paint-blue":"#5579A0","paint-green":"#6F9466","paint-cream":"#E3D5B5","paint-brown":"#85593A","key":"#E8F0FF","fill":"#F0DCC0","paper":"#F2EEE4","ink":"#1F2430","signal-warn":"#9C2A1E","signal-ok":"#2B5A3A","accent":"#E0359A"}
+}
+</script>
+<!-- Lighting per scheme: the recipe's ratios as three.js 0.160 intensities (physical units, ACES tone mapping). -->
+<script type="application/json" id="moods">
+{
+ "sunny":   {"key":"sun",  "keyPos":[-6, 7.5, 3],    "keyI":3.0, "fillI":2.0, "candle":false, "glow":0.0,
+             "fog":[15, 28], "exposure":1.0,  "bloom":[0.15, 1.4],  "vignette":0.3,  "grade":[1.03, 1.0, 0.95], "gradeAmt":0.6, "flicker":false},
+ "candle":  {"key":"spot", "keyPos":[0.4, 8.4, 0.6], "keyI":95,  "fillI":6.0, "candle":true,  "glow":1.4,
+             "fog":[14, 23], "exposure":1.05, "bloom":[0.55, 0.82], "vignette":0.85, "grade":[1.06, 0.98, 0.86], "gradeAmt":0.6, "flicker":true},
+ "morning": {"key":"sun",  "keyPos":[-8, 4.5, -1],   "keyI":3.2, "fillI":1.6, "candle":false, "glow":0.0,
+             "fog":[15, 26], "exposure":1.0,  "bloom":[0.15, 1.4],  "vignette":0.35, "grade":[0.97, 1.0, 1.05], "gradeAmt":0.6, "flicker":false}
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------- setup ----------
+const params = new URLSearchParams(location.search);
+const FRAME = params.get('frame');           // key-scene | character | prop | text-heavy | dont
+const DONT = FRAME === 'dont';
+const PALETTES = JSON.parse(document.getElementById('palettes').textContent);
+const MOODS = JSON.parse(document.getElementById('moods').textContent);
+let moodName = PALETTES[params.get('mood')] ? params.get('mood') : 'sunny';
+const pal = () => PALETTES[moodName], mood = () => MOODS[moodName];
+if (FRAME) document.body.classList.add('frame');
+const W = () => FRAME ? 1280 : innerWidth, H = () => FRAME ? 720 : innerHeight;
+
+// seeded random, so every frame is the same on every run
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(20261107);
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(FRAME ? 1 : Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = DONT ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+
+// ---------- textures: neutral grain (multiplied over every paint) and table planks ----------
+function wavyStrokes(x, w, h, n, y0s, amp, alpha) {
+  for (let i = 0; i < n; i++) {
+    const y0 = y0s ? y0s() : rnd() * h, a = amp * (0.4 + rnd()), f = 1 + Math.floor(rnd() * 3), ph = rnd() * 6.283;
+    const g = Math.round(140 + rnd() * 70);
+    x.strokeStyle = `rgba(${g},${g},${g},${alpha * (0.5 + rnd())})`; x.lineWidth = 1 + rnd();
+    for (const dy of [-h, 0, h]) {          // drawn three times so the tile wraps vertically
+      x.beginPath();
+      for (let px = 0; px <= w; px += 8) { const y = y0 + dy + Math.sin(px / w * 6.283 * f + ph) * a; px ? x.lineTo(px, y) : x.moveTo(px, y); }
+      x.stroke();
+    }
+  }
+}
+function canvasTex(c, rx = 1, ry = 1) {
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+const GRAIN = (() => {                      // 256x256, mean value about 0.9, neutral grey
+  const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  x.fillStyle = '#ececec'; x.fillRect(0, 0, 256, 256);
+  wavyStrokes(x, 256, 256, 90, null, 4, 0.22);
+  for (let i = 0; i < 1400; i++) { const g = Math.round(180 + rnd() * 60); x.fillStyle = `rgba(${g},${g},${g},0.4)`; x.fillRect(rnd() * 256, rnd() * 256, 1, 1); }
+  return canvasTex(c, 2, 2);
+})();
+// ---------- loaded art: MaterialCraft tiling materials, TextureCraft-painted maps, Meshy models ----------
+// Everything is awaited before the first render, so frame mode never captures a half-loaded table.
+const texLoader = new THREE.TextureLoader();
+function loadTex(name, srgb = true) {
+  return new Promise((ok, fail) => texLoader.load(IMG('assets/' + name), t => {
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; ok(t);
+  }, undefined, fail));
+}
+const TEX_NAMES = ['table_color.jpg', 'table_normal.jpg', 'cobble_color.jpg', 'cobble_normal.jpg',
+  'bakery_cream.jpg', 'bakery_blue.jpg', 'bakery_ochre.jpg', 'bakery_green.jpg',
+  'baker_finish.jpg', 'cart_tc.jpg', 'cart_red.jpg', 'stall_finish.jpg'];
+const TEX = Object.fromEntries(await Promise.all(TEX_NAMES.map(async n => [n.replace('.jpg', ''), await loadTex(n, !n.includes('normal'))])));
+for (const k of ['table_color', 'table_normal', 'cobble_color', 'cobble_normal']) TEX[k].wrapS = TEX[k].wrapT = THREE.RepeatWrapping;
+for (const k of TEX_NAMES.map(n => n.replace('.jpg', ''))) if (!k.startsWith('table') && !k.startsWith('cobble')) TEX[k].flipY = false;  // glTF UVs
+const GEOM = {};                            // one merged geometry per Meshy model, base on y=0, centred
+await Promise.all(Object.entries(window.MODELS).map(([name, b64]) => new Promise((ok, fail) => {
+  const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+  new GLTFLoader().parse(bin.buffer, '', gl => {
+    let geo = null; gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse(o => { if (o.isMesh && !geo) geo = o.geometry.clone().applyMatrix4(o.matrixWorld); });
+    geo.computeBoundingBox(); const b = geo.boundingBox;
+    geo.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+    if (DONT) geo.computeVertexNormals(); else { geo = geo.toNonIndexed(); geo.computeVertexNormals(); }
+    geo.computeBoundingBox(); GEOM[name] = geo; ok();
+  }, fail);
+})));
+// a Meshy model at a given height, with one painted map (or a palette paint for bare wood)
+const modelMats = [];
+function model(name, height, map, o = {}) {
+  const g = GEOM[name], s = height / (g.boundingBox.max.y - g.boundingBox.min.y);
+  const m = o.mat ?? (DONT ? new THREE.MeshStandardMaterial({ map, roughness: 0.12, metalness: 0.35 })
+                           : new THREE.MeshStandardMaterial({ map, roughness: 0.82, metalness: 0, flatShading: true }));
+  if (!o.mat) modelMats.push(m);
+  const mesh = new THREE.Mesh(g, m); mesh.scale.set(s * (o.wide ?? 1), s, s * (o.deep ?? 1));
+  mesh.castShadow = mesh.receiveShadow = true;
+  const grp = new THREE.Group(); grp.add(mesh); return grp;
+}
+
+// ---------- painted-wood materials: one per role, paint x grain, matte, flat-shaded ----------
+const mats = new Map();
+function paint(role, o = {}) {
+  const k = [role, o.rough, o.noGrain, o.glow].join('|');
+  if (mats.has(k)) return mats.get(k);
+  const m = DONT
+    ? new THREE.MeshStandardMaterial({ roughness: 0.12, metalness: 0.35 })        // glossy plastic: the look broken
+    : new THREE.MeshStandardMaterial({ map: o.noGrain ? null : GRAIN, roughness: o.rough ?? 0.8, metalness: 0, flatShading: true });
+  m.userData = { role, glow: !!o.glow };
+  mats.set(k, m); return m;
+}
+
+// ---------- geometry: chamfered boxes and carved (jittered, flat) primitives ----------
+const SEG = n => DONT ? n * 5 : n;
+function chamferBox(w, h, d, b) {
+  if (DONT) return new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+  const x = w / 2 - b, z = d / 2 - b, depth = Math.max(h - 2 * b, 0.001), s = new THREE.Shape();
+  s.moveTo(-x, -z); s.lineTo(x, -z); s.lineTo(x, z); s.lineTo(-x, z);
+  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, curveSegments: 1 });
+  g.rotateX(-Math.PI / 2); g.translate(0, -depth / 2, 0);
+  return g;
+}
+// Knife facets: move each vertex by a seeded offset hashed from its position, so shared corners stay shut.
+function carve(g, amt) {
+  if (DONT) return g;
+  if (g.index) g = g.toNonIndexed();
+  const p = g.attributes.position, offs = new Map();
+  for (let i = 0; i < p.count; i++) {
+    const key = p.getX(i).toFixed(3) + ',' + p.getY(i).toFixed(3) + ',' + p.getZ(i).toFixed(3);
+    if (!offs.has(key)) offs.set(key, [(rnd() - 0.5) * 2 * amt, (rnd() - 0.5) * 2 * amt, (rnd() - 0.5) * 2 * amt]);
+    const o = offs.get(key); p.setXYZ(i, p.getX(i) + o[0], p.getY(i) + o[1], p.getZ(i) + o[2]);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+function part(group, geom, mat, pos = [0, 0, 0], rot = [0, 0, 0], scl = [1, 1, 1], shadow = true) {
+  const m = new THREE.Mesh(geom, mat);
+  m.position.set(...pos); m.rotation.set(...rot); m.scale.set(...scl);
+  m.castShadow = shadow; m.receiveShadow = true; group.add(m); return m;
+}
+
+// ---------- live text on painted signs and paper cards (drawn by the engine, redrawn per palette) ----------
+const labels = [];
+function label(lines, w = 512, h = 112, role = 'paper') {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const draw = () => {
+    const x = c.getContext('2d'), p = pal();
+    x.fillStyle = p[role]; x.fillRect(0, 0, w, h);
+    x.fillStyle = p.ink; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const fs = Math.min(h / lines.length * 0.62, 64);
+    x.font = `${fs}px Georgia, "Palatino Linotype", serif`;
+    lines.forEach((s, i) => x.fillText(s, w / 2, h * (i + 0.5) / lines.length, w - 24));
+    tex.needsUpdate = true;
+  };
+  labels.push(draw); draw();
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 });
+}
+
+// ---------- pieces ----------
+// One figurine body for every character: base, legs, coat, skin and head bands (about 0.6 tall).
+function figurine(o) {
+  const g = new THREE.Group(), C = 0.006;
+  part(g, carve(new THREE.CylinderGeometry(0.14, 0.15, 0.045, SEG(10)), C), paint('paint-brown'), [0, 0.0225, 0]);
+  part(g, carve(new THREE.CylinderGeometry(0.07, 0.085, 0.2, SEG(8)), C), paint(o.legs), [0, 0.145, 0]);
+  part(g, carve(new THREE.CylinderGeometry(0.075, 0.115, 0.21, SEG(8)), C), paint(o.coat), [0, 0.345, 0]);
+  for (const s of [-1, 1])
+    part(g, carve(new THREE.CapsuleGeometry(0.026, 0.13, 2, SEG(6)), C * 0.6), paint(o.coat), [s * 0.1, 0.35, 0.02], [-0.35, 0, s * 0.22]);
+  part(g, carve(new THREE.IcosahedronGeometry(0.068, DONT ? 4 : 1), C * 0.8), paint('wood-bare', { rough: 0.9 }), [0, 0.505, 0]);
+  for (const s of [-1, 1]) part(g, new THREE.BoxGeometry(0.012, 0.016, 0.01), paint('ink', { noGrain: true }), [s * 0.024, 0.515, 0.064], [0, 0, 0], [1, 1, 1], false);
+  if (o.hat === 'toque') {
+    part(g, carve(new THREE.CylinderGeometry(0.058, 0.062, 0.05, SEG(8)), C * 0.5), paint('paint-cream'), [0, 0.575, 0]);
+    part(g, carve(new THREE.SphereGeometry(0.078, SEG(8), SEG(4)), C * 0.6), paint('paint-cream'), [0, 0.62, 0], [0, 0, 0], [1, 0.62, 1]);
+  } else if (o.hat) {
+    part(g, carve(new THREE.CylinderGeometry(0.11, 0.11, 0.014, SEG(10)), C * 0.4), paint(o.hat), [0, 0.56, 0]);
+    part(g, carve(new THREE.CylinderGeometry(0.055, 0.065, 0.07, SEG(8)), C * 0.4), paint(o.hat), [0, 0.6, 0]);
+  }
+  if (o.apron) part(g, carve(chamferBox(0.13, 0.24, 0.02, 0.006), C * 0.4), paint(o.apron), [0, 0.3, 0.1], [-0.08, 0, 0]);
+  if (o.peel) {
+    part(g, carve(new THREE.CylinderGeometry(0.012, 0.012, 0.5, SEG(6)), 0.002), paint('wood-bare', { rough: 0.9 }), [0.16, 0.36, 0.14], [0.55, 0, -0.15]);
+    const peel = part(g, carve(chamferBox(0.16, 0.012, 0.18, 0.004), 0.003), paint('wood-bare', { rough: 0.9 }), [0.2, 0.48, 0.3], [0.2, 0, 0]);
+    peel.add(loaf('round', [0, 0.03, 0]));
+  }
+  if (o.basket) {
+    part(g, carve(new THREE.CylinderGeometry(0.075, 0.06, 0.08, SEG(8)), C * 0.5), paint('paint-ochre'), [-0.13, 0.27, 0.06]);
+    g.add(loaf('long', [-0.13, 0.33, 0.06], 0.6));
+  }
+  g.scale.setScalar(o.scale ?? 1);
+  return g;
+}
+function loaf(kind, pos = [0, 0, 0], s = 1) {
+  const g = new THREE.Group(); g.position.set(...pos); g.scale.setScalar(s);
+  if (kind === 'round') {
+    part(g, carve(new THREE.SphereGeometry(0.07, SEG(7), SEG(4)), 0.004), paint('paint-ochre'), [0, 0, 0], [0, rnd() * 3, 0], [1, 0.62, 1]);
+    for (const dx of [-0.022, 0.022]) part(g, new THREE.BoxGeometry(0.008, 0.008, 0.07), paint('paint-brown'), [dx, 0.04, 0], [0, 0.3, 0], [1, 1, 1], false);
+  } else if (kind === 'long') {
+    part(g, carve(new THREE.CapsuleGeometry(0.034, 0.16, 2, SEG(6)), 0.003), paint('paint-ochre'), [0, 0, 0], [0, 0, Math.PI / 2], [1, 1, 0.8]);
+  } else {
+    part(g, carve(new THREE.SphereGeometry(0.04, SEG(6), SEG(3)), 0.003), paint('paint-ochre'), [0, 0, 0], [0, 0, 0], [1, 0.7, 1]);
+  }
+  return g;
+}
+// The four main pieces are Meshy models (image-to-3D from ComfyUI concepts); TextureCraft repainted them in
+// the palette's paints with grain, chipped edges and a wash. Only words stay live: signs and cards are drawn here.
+function shop(o) {
+  const g = model('bakery', o.h, o.bare ? null : TEX['bakery_' + o.paint],
+                  { wide: 1.1, deep: 0.65, mat: o.bare ? paint('wood-bare', { rough: 0.9 }) : undefined });
+  if (!o.bare) {                     // the model's blank sign board gets a live painted sign
+    const mesh = g.children[0], y = o.h * 0.49; g.updateMatrixWorld(true);
+    const hit = new THREE.Raycaster(new THREE.Vector3(0, y, 5), new THREE.Vector3(0, 0, -1)).intersectObject(mesh)[0];
+    const w = 0.36 * o.h, h = 0.075 * o.h;
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(w, h), label([o.sign], 512, Math.round(512 * h / w), 'paint-cream'));
+    sign.position.set(0, y, (hit ? hit.point.z : 0.4) + 0.006); sign.receiveShadow = true; g.add(sign);
+  }
+  return g;
+}
+function stall() {
+  const g = model('stall', 1.25, TEX.stall_finish);
+  // a tent card with live text, leaning on the counter, inside the focus band
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.14), label(['Rye 3 · Buns 1'], 512, 211));
+  card.position.set(0.18, 0.3, 0.33); card.rotation.x = -0.12; card.castShadow = true; g.add(card);
+  return g;
+}
+
+// ---------- the table, the base and the bakery street ----------
+const world = new THREE.Group(); scene.add(world);
+const tableMat = DONT ? new THREE.MeshStandardMaterial({ roughness: 0.1, metalness: 0.3 })
+                      : new THREE.MeshStandardMaterial({ map: TEX.table_color, normalMap: TEX.table_normal, roughness: 0.7 });
+for (const t of [TEX.table_color, TEX.table_normal]) t.repeat.set(26 / 12, 18 / 6);  // a tile = four 1.5-unit planks, stretched to 12 units long
+tableMat.userData = { role: 'table' }; mats.set('table-surface', tableMat);
+const table = new THREE.Mesh(new THREE.PlaneGeometry(26, 18), tableMat);
+table.rotation.x = -Math.PI / 2; table.receiveShadow = true; world.add(table);
+
+const BASE_TOP = 0.22;
+part(world, chamferBox(7.3, 0.18, 4.55, 0.03), paint('paint-brown'), [0, 0.09, 0]);                 // frame
+part(world, chamferBox(7.0, 0.06, 4.25, 0.015), paint('wood-bare', { rough: 0.9 }), [0, 0.19, 0]);   // carved top
+const board = new THREE.Group(); board.position.y = BASE_TOP; world.add(board);
+
+// cobbled street: one plane with MaterialCraft's tiling setts (colour x wood-bare, plus a normal map)
+{
+  const m = DONT ? new THREE.MeshStandardMaterial({ roughness: 0.1, metalness: 0.3 })
+                 : new THREE.MeshStandardMaterial({ map: TEX.cobble_color, normalMap: TEX.cobble_normal, roughness: 0.88 });
+  if (!DONT) m.normalScale.set(1.4, -1.4);
+  m.userData = { role: 'wood-bare' }; mats.set('cobbles', m);
+  const w = 6.7, d = 1.42, tile = 1.5;
+  for (const t of [TEX.cobble_color, TEX.cobble_normal]) t.repeat.set(w / tile, d / tile);
+  const street = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m);
+  street.rotation.x = -Math.PI / 2; street.position.set(0, 0.004, -0.04); street.receiveShadow = true; board.add(street);
+}
+
+const shops = [
+  { x: -2.8,  h: 1.8,  paint: 'cream', sign: 'BREAD' },
+  { x: -1.48, h: 2.1,  paint: 'blue',  sign: 'CAKES & BUNS' },
+  { x: -0.1,  h: 1.9,  paint: 'ochre', sign: 'FLOUR' },
+  { x: 1.32,  h: 2.2,  paint: 'green', sign: 'PIES' },
+  { x: 2.62,  h: 1.5,  bare: true },            // bare wood: a shop not built yet
+];
+for (const s of shops) { const g = shop(s); g.position.set(s.x, 0, -1.4); board.add(g); }
+
+const stallG = stall(); stallG.position.set(-2.2, 0, 1.45); stallG.rotation.y = 0.15; board.add(stallG);
+const baker = model('baker', 0.68, TEX.baker_finish);
+baker.position.set(-0.45, 0, 0.2); baker.rotation.y = 0.35; board.add(baker);
+const customer = figurine({ legs: 'paint-blue', coat: 'paint-green', hat: 'paint-brown', basket: true });
+customer.position.set(-1.75, 0, 0.55); customer.rotation.y = 0.9; board.add(customer);
+const child = figurine({ legs: 'paint-blue', coat: 'paint-red', hat: 'paint-ochre', scale: 0.75 });
+child.position.set(2.1, 0, 0.75); child.rotation.y = -0.5; board.add(child);
+const cartA = model('cart', 0.55, TEX.cart_tc); cartA.position.set(0.85, 0, 0.3); cartA.rotation.y = -0.25; board.add(cartA);
+const cartB = model('cart', 0.5, TEX.cart_red); cartB.position.set(2.6, 0, 1.5); cartB.rotation.y = 0.5; board.add(cartB);
+for (const [x, z] of [[-0.2, 1.6], [0.25, 1.75], [3.0, 0.2]]) board.add(loaf('round', [x, 0.04, z]));
+// a crate in bare wood beside the unbuilt shop
+part(board, carve(chamferBox(0.34, 0.16, 0.26, 0.012), 0.006), paint('wood-bare', { rough: 0.9 }), [3.05, 0.08, -0.55]);
+
+// the accent's one job: what the player can act on now (the loaded cart)
+const ringMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+const ring = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.6, SEG(48)), ringMat);
+ring.rotation.x = -Math.PI / 2; ring.position.set(0.85, 0.012, 0.3); board.add(ring);
+
+// full-size objects on the table hold the scale: a rolling pin, a cup on its saucer, a stack of cards, a candle
+{
+  const pin = new THREE.Group(); pin.position.set(-4.4, 0.2, 2.9); pin.rotation.y = 0.45; world.add(pin);
+  part(pin, carve(new THREE.CylinderGeometry(0.2, 0.2, 2.6, SEG(10)), 0.01), paint('wood-bare', { rough: 0.9 }), [0, 0, 0], [0, 0, Math.PI / 2]);
+  for (const s of [-1, 1]) part(pin, carve(new THREE.CylinderGeometry(0.07, 0.08, 0.55, SEG(8)), 0.006), paint('wood-bare', { rough: 0.9 }), [s * 1.57, 0, 0], [0, 0, Math.PI / 2]);
+  const cup = new THREE.Group(); cup.position.set(-4.7, 0, -1.7); world.add(cup);
+  part(cup, carve(new THREE.CylinderGeometry(0.72, 0.6, 0.06, SEG(14)), 0.008), paint('paint-cream', { rough: 0.5 }), [0, 0.03, 0]);
+  part(cup, carve(new THREE.CylinderGeometry(0.48, 0.35, 0.8, SEG(14)), 0.008), paint('paint-blue', { rough: 0.5 }), [0, 0.46, 0]);
+  part(cup, new THREE.CircleGeometry(0.43, SEG(14)), paint('paint-brown', { noGrain: true, rough: 0.3 }), [0, 0.865, 0], [-Math.PI / 2, 0, 0]);
+  part(cup, carve(new THREE.TorusGeometry(0.17, 0.045, SEG(6), SEG(10), Math.PI * 1.3), 0.004), paint('paint-blue', { rough: 0.5 }), [0.5, 0.5, 0], [0, 0, -Math.PI * 0.65]);
+  const cards = new THREE.Group(); cards.position.set(4.75, 0, 1.7); cards.rotation.y = -0.3; world.add(cards);
+  for (let i = 0; i < 4; i++) part(cards, new THREE.BoxGeometry(0.9, 0.012, 0.6), paint('paper', { noGrain: true, rough: 0.9 }), [rnd() * 0.06, 0.006 + i * 0.013, rnd() * 0.06], [0, (rnd() - 0.5) * 0.2, 0]);
+  const top = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.56), label(["Today's bake", 'rye · seed · honey'], 512, 334));
+  top.rotation.x = -Math.PI / 2; top.position.set(0.02, 0.06, 0.02); top.receiveShadow = true; cards.add(top);
+}
+const candleG = new THREE.Group(); candleG.position.set(3.95, 0, -2.75); world.add(candleG);
+part(candleG, carve(new THREE.CylinderGeometry(0.5, 0.55, 0.06, SEG(12)), 0.006), paint('paint-brown', { rough: 0.5 }), [0, 0.03, 0]);
+part(candleG, carve(new THREE.CylinderGeometry(0.2, 0.22, 1.0, SEG(10)), 0.006), paint('paint-cream', { noGrain: true, rough: 0.6 }), [0, 0.56, 0]);
+const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc070 }));
+flame.scale.set(0.7, 1.6, 0.7); flame.position.set(0, 1.18, 0); candleG.add(flame);
+
+// ---------- lights: one key (sun or lamp spot), one fill, a practical candle ----------
+const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 3);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 6, bottom: -6, near: 0.5, far: 40 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02; scene.add(sun, sun.target);
+const spot = new THREE.SpotLight(0xffffff, 95, 0, 0.9, 0.6, 1.6);
+spot.castShadow = true; spot.shadow.mapSize.set(2048, 2048); spot.shadow.bias = -0.0004; spot.shadow.normalBias = 0.02;
+spot.target.position.set(0, 0, -0.5); scene.add(spot, spot.target);
+const candle = new THREE.PointLight(0xffb070, 5, 7, 1.6); candle.position.set(3.95, 1.2, -2.75); scene.add(candle);
+let envTex = null;   // only the "don't" frame gets reflections, to look like glossy plastic
+if (DONT) envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+// ---------- post: guard, bloom on light sources only, tilt-shift + vignette + grade, output ----------
+const rt = new THREE.WebGLRenderTarget(W(), H(), { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+const renderPass = new RenderPass(scene, null); composer.addPass(renderPass);
+const VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+const guard = new ShaderPass({ uniforms: { tDiffuse: { value: null } }, vertexShader: VS, fragmentShader: `
+  uniform sampler2D tDiffuse; varying vec2 vUv;
+  void main(){ vec4 c = texture2D(tDiffuse, vUv);
+    if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0);   // one NaN would spread through bloom
+    gl_FragColor = clamp(c, 0.0, 40.0); }` });
+composer.addPass(guard);
+const bloom = new UnrealBloomPass(new THREE.Vector2(W(), H()), 0.3, 0.7, 1.0); composer.addPass(bloom);
+const lens = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, res: { value: new THREE.Vector2(W(), H()) }, focus: { value: 0.46 }, amount: { value: 5 },
+              vig: { value: 0.3 }, grade: { value: new THREE.Vector3(1, 1, 1) }, gradeAmt: { value: 0.6 } },
+  vertexShader: VS, fragmentShader: `
+  uniform sampler2D tDiffuse; uniform vec2 res; uniform float focus, amount, vig, gradeAmt; uniform vec3 grade; varying vec2 vUv;
+  void main(){
+    float d = vUv.y - focus;
+    float b = d > 0.0 ? smoothstep(0.1, 0.5, d) : 0.3 * smoothstep(0.2, 0.55, -d);
+    float r = b * amount; vec4 acc = vec4(0.0);
+    for (int i = 0; i < 16; i++) { float fi = float(i); float a = fi * 2.39996;
+      acc += texture2D(tDiffuse, vUv + vec2(cos(a), sin(a)) * sqrt(fi / 16.0) * r / res); }
+    vec4 c = acc / 16.0;
+    float v = smoothstep(1.05, 0.25, length((vUv - vec2(0.5, 0.52)) * vec2(1.1, 1.25)));
+    c.rgb *= mix(1.0, v, vig);
+    c.rgb = mix(c.rgb, c.rgb * grade, gradeAmt);
+    gl_FragColor = c; }` });
+composer.addPass(lens);
+composer.addPass(new OutputPass());
+let tilt = !DONT, tiltScale = 1;
+
+// ---------- cameras (framings) ----------
+let camera, framing = 'table', fogRange = [15, 28];
+const camBase = new THREE.Vector3(), ISO = { viewH: 7.2, dist: 30 };
+function setFraming(f) {
+  framing = f;
+  if (f === 'table') {          // seated at the table: FOV 36, about 38 deg down, 10.8 units from the base's centre
+    camera = new THREE.PerspectiveCamera(36, W() / H(), 0.1, 60);
+    camera.position.set(0, 7.0, 8.2); camera.lookAt(0, 0.35, -0.3);
+  } else {                      // isometric: orthographic, yaw 45, pitch 32
+    const a = W() / H(), v = ISO.viewH, pitch = THREE.MathUtils.degToRad(32), yaw = Math.PI / 4;
+    camera = new THREE.OrthographicCamera(-v * a / 2, v * a / 2, v / 2, -v / 2, 0.1, 100);
+    camera.position.set(ISO.dist * Math.cos(pitch) * Math.sin(yaw), ISO.dist * Math.sin(pitch), ISO.dist * Math.cos(pitch) * Math.cos(yaw));
+    camera.lookAt(0, 0.4, 0);
+  }
+  camBase.copy(camera.position); renderPass.camera = camera;
+  tiltScale = f === 'iso' ? 1.2 : 1;
+  document.getElementById('bTable').setAttribute('aria-pressed', f === 'table');
+  document.getElementById('bIso').setAttribute('aria-pressed', f === 'iso');
+  applyMood();
+}
+function closeUp(target, offset, lookUp, fov) {   // character and prop frames
+  scene.updateMatrixWorld(true);
+  camera = new THREE.PerspectiveCamera(fov, W() / H(), 0.05, 60);
+  const t = new THREE.Vector3(); target.getWorldPosition(t);
+  camera.position.copy(t).add(new THREE.Vector3(...offset)); camera.lookAt(t.x, t.y + lookUp, t.z);
+  camBase.copy(camera.position); renderPass.camera = camera; framing = 'close'; tiltScale = 0.5;
+}
+
+// ---------- lighting scheme and palette ----------
+const vOf = hex => Math.max(...[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))) / 255;
+function applyMood() {
+  const p = pal(), m = mood();
+  for (const mt of mats.values()) {
+    mt.color.set(p[mt.userData.role]);
+    if (mt.userData.glow) { mt.emissive.set(p.key); mt.emissiveIntensity = DONT ? 0 : m.glow; }
+    mt.envMap = envTex;
+  }
+  for (const mt of modelMats) mt.envMap = envTex;
+  ringMat.color.set(p.accent);
+  scene.background = new THREE.Color(p.room);
+  fogRange = framing === 'iso' ? [ISO.dist + 5, ISO.dist + 16] : m.fog;
+  scene.fog = DONT ? null : new THREE.Fog(p.room, fogRange[0], fogRange[1]);
+  hemi.color.set(p.fill); hemi.groundColor.set(p.table).multiplyScalar(0.5);
+  hemi.intensity = DONT ? 0 : m.fillI;
+  const useSpot = !DONT && m.key === 'spot';
+  sun.visible = !useSpot; spot.visible = useSpot;
+  sun.color.set(p.key); spot.color.set(p.key);
+  if (DONT) { sun.position.set(0.5, 10, 1.5); sun.intensity = 6; }        // harsh overhead light, black shadows
+  else { sun.position.set(...m.keyPos); sun.intensity = m.keyI; spot.position.set(...m.keyPos); spot.intensity = m.keyI; }
+  candle.visible = flame.visible = !DONT && m.candle;
+  renderer.toneMappingExposure = m.exposure;
+  bloom.enabled = !DONT; bloom.strength = m.bloom[0]; bloom.threshold = m.bloom[1];
+  lens.enabled = !DONT;
+  lens.uniforms.vig.value = m.vignette; lens.uniforms.grade.value.set(...m.grade); lens.uniforms.gradeAmt.value = m.gradeAmt;
+  for (const draw of labels) draw();
+  const root = document.documentElement.style;
+  for (const [role, hex] of Object.entries(p)) if (role !== 'label') root.setProperty('--' + role, hex);
+  const rc = [1, 3, 5].map(i => parseInt(p.room.slice(i, i + 2), 16));
+  root.setProperty('--room-a', `rgba(${rc.join(',')},0.75)`);
+  document.body.classList.toggle('dark-room', vOf(p.room) <= 0.3);
+  setTiltAmount(); requestRender();
+}
+function setTiltAmount() {
+  const pr = renderer.getPixelRatio();
+  lens.uniforms.res.value.set(W() * pr, H() * pr);
+  lens.uniforms.amount.value = tilt ? 5 * tiltScale * (H() * pr / 720) : 0;   // 5 px full radius at 720p
+}
+const hud = document.getElementById('hud');
+function resize() {
+  renderer.setSize(W(), H(), !FRAME); composer.setSize(W(), H());
+  const a = W() / H();
+  if (camera.isOrthographicCamera) { const v = ISO.viewH; Object.assign(camera, { left: -v * a / 2, right: v * a / 2 }); }
+  else camera.aspect = a;
+  camera.updateProjectionMatrix(); setTiltAmount();
+  hud.style.transform = FRAME ? 'none' : `scale(${Math.min(W() / 1280, H() / 720)})`;
+  requestRender();
+}
+
+// ---------- frames ----------
+function setupFrame(f) {
+  if (f === 'key-scene' || f === 'text-heavy') hud.classList.add('on');
+  if (f === 'text-heavy') hud.classList.add('busy');
+  if (f === 'character') closeUp(baker, [0.62, 0.52, 1.5], 0.33, 28);
+  if (f === 'prop') { ring.visible = false; closeUp(cartA, [0.45, 0.85, 1.6], 0.2, 30); }
+}
+
+// ---------- render loop: ~10 fps when idle, full rate briefly after input, paused when hidden ----------
+let needRender = true, activeUntil = 0, last = 0, running = false, frameCount = 0;
+const FIXED_T = 2.0;   // every frame-mode render uses this time
+function requestRender() { needRender = true; activeUntil = performance.now() + 300; kick(); }
+function update(t) {
+  const m = mood(), k = (!DONT && m.flicker) ? 0.97 + 0.03 * Math.sin(7.3 * t) * Math.sin(2.1 * t) : 1;
+  spot.intensity = m.keyI * k; candle.intensity = 5 * k;
+  ring.scale.setScalar(1 + 0.06 * Math.sin(t * 2 * Math.PI * 1.2));
+  if (framing === 'table') camera.position.x = camBase.x + Math.sin(t * 0.13) * 0.05;
+}
+function loop(ms) {
+  if (FRAME) {
+    update(FIXED_T); composer.render();
+    if (++frameCount < 10) requestAnimationFrame(loop); else document.title = 'ready';
+    return;
+  }
+  if (document.hidden) { running = false; return; }
+  if (needRender || ms < activeUntil || ms - last >= 100) { update(ms / 1000); composer.render(); last = ms; needRender = false; }
+  requestAnimationFrame(loop);
+}
+function kick() { if (!FRAME && !running && !document.hidden) { running = true; requestAnimationFrame(loop); } }
+document.addEventListener('visibilitychange', kick);
+
+// ---------- controls (outside frame mode) ----------
+if (!FRAME) {
+  hud.classList.add('on');
+  const sel = document.getElementById('mood');
+  for (const [k, p] of Object.entries(PALETTES)) sel.add(new Option(p.label, k, false, k === moodName));
+  sel.onchange = () => { moodName = sel.value; applyMood(); };
+  document.getElementById('bTable').onclick = () => { setFraming('table'); resize(); };
+  document.getElementById('bIso').onclick = () => { setFraming('iso'); resize(); };
+  document.getElementById('bTilt').onclick = e => { tilt = !tilt; e.currentTarget.setAttribute('aria-pressed', tilt); setTiltAmount(); requestRender(); };
+  document.getElementById('bBusy').onclick = e => { const on = hud.classList.toggle('busy'); e.currentTarget.setAttribute('aria-pressed', on); };
+  canvas.addEventListener('pointermove', requestRender);
+  addEventListener('resize', resize);
+}
+
+// ---------- start ----------
+setFraming('table');
+if (FRAME) setupFrame(FRAME);
+resize();
+if (FRAME) requestAnimationFrame(loop); else kick();
+</script>
+</body>
+</html>

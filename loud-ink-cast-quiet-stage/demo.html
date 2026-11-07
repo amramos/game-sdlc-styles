@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loud ink cast demo</title>
+<!-- Loud ink cast on a quiet stage: a monster-run night-market food stall.
+     Stage and cast are generated images in cast/ (see cast/README.md); every panel, chip, label,
+     word and number is drawn here as live HTML/CSS. No network, no storage. -->
+<style>
+  :root {
+    --ink:#121624; --paper:#F2EADB; --accent:#FF4A1C; --shadow:#12333A;
+    --signal-1:#7FB2FF; --signal-2:#FFC93C; --signal-3:#3CCB98;
+    --counter:#0B0D14; --key:#FF00FF;
+    --display: "Bebas Neue", "League Gothic", "Oswald", Impact, "Arial Narrow", sans-serif;
+    --body: "Special Elite", "Courier New", "IBM Plex Mono", ui-monospace, monospace;
+  }
+  html, body { margin:0; height:100%; overflow:hidden; background:#0A0B10; }
+  body { font-family:var(--body); color:var(--ink); }
+
+  /* the 1280x720 screen; scaled to fit outside frame mode, pinned 1:1 in frame mode */
+  #app { position:absolute; left:0; top:0; width:1280px; height:720px; overflow:hidden; transform-origin:0 0; background:var(--counter); }
+  body.frame #app { position:fixed; left:0; top:0; transform:none !important; }
+  body.frame #controls { display:none; }
+  body.frame *, body.frame *::before { transition:none !important; animation:none !important; }
+
+  /* ---------- stage (quiet): image layers in one box; the camera is a transform on the box ---------- */
+  #stage { position:absolute; inset:0; transform-origin:0 0; transition:transform .4s ease; }
+  #stage img.backdrop { position:absolute; left:-20px; top:-70px; width:1320px; height:880px; object-fit:cover; }
+  #stage .actor { position:absolute; }
+  #customer { left:150px; top:118px; height:500px; transform-origin:50% 100%; }
+  #counter { position:absolute; left:0; right:0; bottom:0; height:180px; background:var(--counter); border-top:4px solid var(--ink); }
+
+  /* the "don't" stage: bright, busy, halftone on the set, glowing string lights */
+  body.dont #stage img.backdrop { filter:saturate(2.4) brightness(1.8) contrast(1.15); }
+  #dontLayer { display:none; position:absolute; inset:0; pointer-events:none; }
+  body.dont #dontLayer { display:block; }
+  #dontLayer .dots { position:absolute; inset:0 0 180px 0; mix-blend-mode:screen; opacity:.55;
+    background-image:radial-gradient(#ff8a00 1.7px, transparent 2px); background-size:7px 7px; }
+  #dontLayer .bulb { position:absolute; width:16px; height:16px; border-radius:50%; }
+  #dontLayer .sign { position:absolute; left:980px; top:150px; width:200px; height:120px; border-radius:20px;
+    background:linear-gradient(135deg,#00f0ff,#ff2bd6); box-shadow:0 0 40px 14px #ff2bd6aa; transform:rotate(6deg); }
+
+  /* ---------- interface (loud): paper panels, 4 px ink outline ---------- */
+  #ui { position:absolute; inset:0; pointer-events:none; z-index:0; }  /* own stacking context: the halftone shadow sits under its panel, over the stage */
+  #ui > * { pointer-events:auto; }
+  .panel { position:absolute; background:var(--paper); border:4px solid var(--ink); padding:10px 12px; color:var(--ink); box-sizing:border-box; }
+  .halftone-shadow::before { content:""; position:absolute; left:8px; top:8px; right:-12px; bottom:-12px; z-index:-1;
+    background-color:transparent; background-image:radial-gradient(var(--shadow) 1.9px, transparent 2.1px); background-size:6px 6px; }
+  .caption { font-family:var(--display); text-transform:uppercase; letter-spacing:.06em; font-size:18px; line-height:1; }
+  .num { font-family:var(--display); line-height:.9; }
+
+  /* the line panel beside the speaker, pointing at them */
+  #line { left:600px; top:110px; width:600px; }
+  #line .who { position:absolute; left:-10px; top:-26px; background:var(--ink); color:var(--paper); padding:4px 10px 3px; transform:rotate(-3deg); }
+  #line p { margin:8px 0 2px; font-size:22px; line-height:1.32; }
+  #line svg.tail { position:absolute; left:-46px; top:calc(50% - 17px); width:46px; height:34px; overflow:visible; }  /* centred on the panel, always inside its height */
+
+  /* tilted labels */
+  .tag { position:absolute; background:var(--paper); border:4px solid var(--ink); padding:6px 10px 4px; }
+  #offer { left:36px; top:30px; transform:rotate(-3deg); text-align:center; }
+  #offer .num { font-size:58px; }
+  #offer .num small { font-size:26px; }
+
+  /* signal chips: own fill, ink text, and the kind in words plus a mark */
+  #chips { position:absolute; left:600px; display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { display:inline-flex; align-items:center; gap:7px; border:4px solid var(--ink); padding:3px 10px 2px 4px;
+    font-family:var(--display); font-size:20px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink); }
+  .chip i { font-style:normal; display:inline-grid; place-items:center; width:24px; height:24px; background:var(--ink); color:var(--paper); font-size:16px; }
+  .chip.s1 { background:var(--signal-1); } .chip.s2 { background:var(--signal-2); } .chip.s3 { background:var(--signal-3); }
+
+  /* the player's options on the near counter: upright (read to decide), lifted on focus */
+  #options { position:absolute; left:28px; bottom:26px; display:flex; gap:22px; align-items:flex-end; }
+  .slot { position:relative; }
+  .card { position:relative; display:block; width:190px; min-height:118px; box-sizing:border-box; text-align:left; cursor:pointer;
+    background:var(--paper); border:4px solid var(--ink); padding:10px 12px; font:inherit; color:var(--ink);
+    transition:transform 80ms cubic-bezier(.34,1.56,.64,1); }
+  .card .caption { display:block; font-size:17px; opacity:.9; }
+  .card b { display:block; font-weight:normal; font-size:19px; line-height:1.2; margin:4px 0 6px; }
+  .card .num { font-size:40px; }
+  .card .num small { font-size:20px; }
+  .card.lift { transform:translateY(-12px) scale(1.06); }
+  .card:focus { outline:none; }
+  #act { position:absolute; right:40px; bottom:44px; background:var(--ink); color:var(--paper); border:4px solid var(--ink);
+    box-shadow:6px 6px 0 var(--accent); font-family:var(--display); font-size:40px; letter-spacing:.05em; padding:10px 26px 6px; cursor:pointer; }
+  #act:active { transform:translate(3px,3px); box-shadow:3px 3px 0 var(--accent); }
+
+  /* focus mark: four paper corners with the ink outline, 14 px clear of the focused thing */
+  #focus { position:absolute; pointer-events:none; transition:all 80ms ease-out; }
+  #focus svg { position:absolute; width:30px; height:30px; overflow:visible; }
+
+  /* the running total: a receipt */
+  #total { right:24px; top:20px; width:250px; transform:rotate(2deg); font-size:18px; }
+  #total .row { display:flex; justify-content:space-between; gap:8px; line-height:1.35; }
+  #total .sum { border-top:3px dashed var(--ink); margin-top:6px; padding-top:6px; align-items:baseline; }
+  #total .sum .num { font-size:46px; }
+  body.busy #line { width:420px; }
+  body.busy #total { left:1040px; right:auto; top:110px; width:216px; }
+
+  /* single-subject frames: one cast element on the flat key colour */
+  #solo { display:none; position:absolute; inset:0; background:var(--key); }
+  body.solo #solo { display:block; }
+  body.solo #stage, body.solo #ui { display:none; }
+  #solo img { position:absolute; left:50%; transform:translateX(-50%); }
+  #solo .tag { transform:rotate(-3deg); }
+
+  /* loudest moment: a diagonal band of paper slashes across; bottom fifth stays clear */
+  #cutin { position:absolute; inset:0; pointer-events:none; display:none; }
+  #cutin.on { display:block; }
+  #cutin .dim { position:absolute; inset:0; background:var(--ink); opacity:.55; }
+  #cutin .band { position:absolute; left:-200px; top:110px; width:1700px; height:300px; transform:rotate(-8deg);
+    background:var(--paper); border-top:4px solid var(--ink); border-bottom:4px solid var(--ink); overflow:hidden; }
+  #cutin .band .dots { position:absolute; inset:0; background-image:radial-gradient(var(--shadow) 2.4px, transparent 2.6px); background-size:6px 6px; opacity:.35; }
+  #cutin .band img { position:absolute; left:330px; top:-30px; height:640px; transform:rotate(8deg); }
+  #cutin .title { position:absolute; left:760px; top:150px; transform:rotate(-8deg); font-family:var(--display);
+    font-size:150px; line-height:.8; color:var(--paper); background:var(--ink); padding:18px 26px 6px; box-shadow:10px 10px 0 var(--accent); }
+  #cutin.anim .band { animation:slash .2s cubic-bezier(.2,.9,.3,1.2) both; }
+  #cutin.anim .title { animation:stamp .14s .2s cubic-bezier(.3,1.6,.6,1) both; }
+  @keyframes slash { from { transform:translateX(-1800px) rotate(-8deg); } }
+  @keyframes stamp { from { transform:scale(1.8) rotate(-14deg); opacity:0; } }
+
+  /* demo controls (hidden in frame mode) */
+  #controls { position:absolute; left:0; right:0; top:0; height:52px; display:flex; gap:8px; align-items:center; padding:0 12px;
+    background:#0A0B10; z-index:5; flex-wrap:wrap; }
+  #controls select, #controls button { font-family:var(--display); font-size:19px; letter-spacing:.04em; color:var(--ink);
+    background:var(--paper); border:3px solid var(--ink); outline:2px solid var(--paper); padding:4px 10px 2px; cursor:pointer; }
+  #controls label { color:#F2EADB; font-family:var(--display); font-size:19px; letter-spacing:.04em; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card, #focus, #stage { transition:none; }
+    .card.lift { transform:none; }
+    #cutin.anim .band, #cutin.anim .title { animation:none; }
+  }
+</style>
+</head>
+<body>
+<div id="controls">
+  <label>Palette <select id="pal"></select></label>
+  <label>Screen <select id="scr">
+    <option value="key-scene">Key scene</option><option value="text-heavy">Busiest screen</option>
+    <option value="character">Character</option><option value="prop">Prop</option><option value="dont">Don't</option>
+  </select></label>
+  <button id="bCut">Loudest moment</button>
+</div>
+
+<div id="app">
+  <div id="stage">
+    <img class="backdrop" id="backdrop" alt="">
+    <div id="dontLayer"><div class="dots"></div><div class="sign"></div></div>
+    <img class="actor" id="customer" src="cast/customer-haggling.png" alt="Pell, a moth customer, haggling">
+    <div id="counter"></div>
+  </div>
+
+  <div id="ui">
+    <div class="tag" id="offer"><div class="caption">Their offer</div><div class="num">8<small> coins</small></div></div>
+    <div class="panel halftone-shadow" id="line">
+      <div class="who caption">Pell</div>
+      <svg class="tail" viewBox="0 0 46 34"><path d="M50 4 L0 17 L50 30" style="fill:var(--paper);stroke:var(--ink)" stroke-width="4" stroke-linejoin="miter"/></svg>
+      <p id="lineText"></p>
+    </div>
+    <div id="chips"></div>
+    <div class="panel" id="total"></div>
+    <div id="options"></div>
+    <button id="act">OFFER</button>
+    <div id="focus"></div>
+  </div>
+
+  <div id="solo"></div>
+
+  <div id="cutin"><div class="dim"></div><div class="band"><div class="dots"></div><img src="cast/keeper-outraged.png" alt=""></div><div class="title">NO DEAL!</div></div>
+</div>
+
+<!-- Palettes fill the same roles. "night" is example-palette.gpl; "day" is a bright daytime market.
+     Both pass every colour rule in style.md. The cast art is not recoloured for "day" (its shadow
+     stays the night teal): only the interface and the stage are tinted. -->
+<script type="application/json" id="palettes">
+{
+  "night": { "label":"Night market (example)", "ink":"#121624", "paper":"#F2EADB", "accent":"#FF4A1C", "shadow":"#12333A",
+             "signal":["#7FB2FF","#FFC93C","#3CCB98"], "counter":"#0B0D14", "stage":"cast/stage-stall-night.png" },
+  "day":   { "label":"Day market", "ink":"#1F1A17", "paper":"#FFF8E7", "accent":"#E8336D", "shadow":"#36143D",
+             "signal":["#8FE3C1","#FFE27A","#C8B6FF"], "counter":"#1A1613", "stage":"cast/stage-stall-day.png" }
+}
+</script>
+<script>
+(() => {
+'use strict';
+const params = new URLSearchParams(location.search);
+const FRAMES = ['key-scene', 'character', 'prop', 'text-heavy', 'dont'];
+const FRAME = FRAMES.includes(params.get('frame')) ? params.get('frame') : null;
+const PALETTES = JSON.parse(document.getElementById('palettes').textContent);
+let palName = PALETTES[params.get('palette')] ? params.get('palette') : 'night';
+let screen = FRAME || 'key-scene';
+const $ = id => document.getElementById(id);
+const app = $('app');
+if (FRAME) document.body.classList.add('frame');
+
+// ---------- content ----------
+const LINE_SHORT = 'Eight coins. That bowl is half steam.';
+const LINE_LONG = 'Eight coins, and not one more. That bowl is half steam and half wishful thinking, ' +
+  'the stall across the lane sells twice the noodles for six, and I have been coming here every night since the moon was new.';
+// the signal kinds: each chip says its kind in a word and a mark, never colour alone
+const CHIPS = [
+  { cls: 's1', mark: '↺', word: 'Regular' },
+  { cls: 's2', mark: '!', word: 'Hungry' },
+  { cls: 's3', mark: '¤', word: 'Flush' },
+];
+const OPTIONS_FEW = [
+  { cap: 'Hold firm', text: 'Stay at the price', price: 12 },
+  { cap: 'Meet them', text: 'Split the difference', price: 10 },
+  { cap: 'Sweeten', text: 'Add a skewer', price: 12 },
+];
+const OPTIONS_ALL = [
+  { cap: 'Hold firm', text: 'Stay at the price', price: 12 },
+  { cap: 'Meet them', text: 'Split the difference', price: 10 },
+  { cap: 'Sweeten', text: 'Add a skewer, keep the price', price: 12 },
+  { cap: 'Their way', text: 'Take eight, ask for a tip', price: 8 },
+  { cap: 'Wave off', text: 'Serve the next in line', price: 0 },
+];
+
+// ---------- palette ----------
+function applyPalette() {
+  const p = PALETTES[palName], r = document.documentElement.style;
+  r.setProperty('--ink', p.ink); r.setProperty('--paper', p.paper); r.setProperty('--accent', p.accent);
+  r.setProperty('--shadow', p.shadow); r.setProperty('--counter', p.counter);
+  p.signal.forEach((c, i) => r.setProperty('--signal-' + (i + 1), c));
+  $('backdrop').src = screen === 'dont' ? 'cast/stage-stall-untamed.png' : p.stage;
+}
+const sel = $('pal');
+for (const [k, p] of Object.entries(PALETTES)) sel.add(new Option(p.label, k, false, k === palName));
+sel.onchange = () => { palName = sel.value; applyPalette(); };
+
+// ---------- the "don't" stage's string lights ----------
+(function bulbs() {
+  const layer = $('dontLayer'), cols = ['#fff36b', '#ff4fd8', '#5cf2ff', '#ffffff', '#7dff6b'];
+  for (let i = 0; i < 34; i++) {
+    const b = document.createElement('div'); b.className = 'bulb';
+    const x = 10 + i * 38, y = 40 + 34 * Math.sin(i * 0.55) + (i % 2) * 8;
+    const c = cols[i % cols.length];
+    b.style.cssText = `left:${x}px;top:${y}px;background:${c};box-shadow:0 0 22px 8px ${c}`;
+    layer.appendChild(b);
+  }
+})();
+
+// ---------- build the screen ----------
+let options = [], focusIdx = 1;
+function build() {
+  const busy = screen === 'text-heavy';
+  const solo = screen === 'character' || screen === 'prop';
+  document.body.classList.toggle('solo', solo);
+  document.body.classList.toggle('dont', screen === 'dont');
+  document.body.classList.toggle('busy', busy);
+  applyPalette();
+
+  if (solo) return buildSolo();
+
+  $('lineText').textContent = busy ? LINE_LONG : LINE_SHORT;
+  // chips: under the line panel; all of them on the busiest screen, one otherwise
+  const chips = $('chips'); chips.innerHTML = '';
+  (busy ? CHIPS : CHIPS.slice(0, 1)).forEach(c => {
+    const s = document.createElement('span'); s.className = 'chip ' + c.cls;
+    s.innerHTML = `<i>${c.mark}</i>${c.word}`; chips.appendChild(s);
+  });
+  // receipt: the running total (busiest screen only)
+  const total = $('total');
+  total.style.display = busy ? '' : 'none';
+  total.innerHTML = `<div class="caption">Tonight's take</div>
+    <div class="row"><span>Noodles ×9</span><span>98</span></div>
+    <div class="row"><span>Skewers ×6</span><span>36</span></div>
+    <div class="row"><span>Tips</span><span>8</span></div>
+    <div class="row sum"><span class="caption">Total</span><span class="num">142</span></div>`;
+  // options on the near counter
+  options = busy ? OPTIONS_ALL : OPTIONS_FEW;
+  const row = $('options'); row.innerHTML = '';
+  row.style.gap = busy ? '14px' : '22px';
+  options.forEach((o, i) => {
+    const slot = document.createElement('div'); slot.className = 'slot';
+    const c = document.createElement('button'); c.className = 'card'; c.dataset.i = i;
+    if (busy) c.style.width = '178px';
+    c.innerHTML = `<span class="caption">${o.cap}</span><b>${o.text}</b><span class="num">${o.price ? o.price + '<small> coins</small>' : '—'}</span>`;
+    c.onmouseenter = c.onfocus = () => setFocus(i);
+    c.onclick = () => { setFocus(i); play(); };
+    slot.appendChild(c); row.appendChild(slot);
+  });
+  focusIdx = Math.min(focusIdx, options.length - 1);
+  requestAnimationFrame(() => { layout(); setFocus(focusIdx, true); });
+}
+function layout() {
+  // chips sit under the line panel, wherever its text ends
+  const line = $('line');
+  $('chips').style.top = (line.offsetTop + line.offsetHeight + 20) + 'px';
+}
+function buildSolo() {
+  const solo = $('solo');
+  if (screen === 'character') {
+    solo.innerHTML = `<img src="cast/keeper-neutral.png" alt="Bramble, the stall keeper" style="top:40px;height:680px">
+      <div class="tag" style="left:910px;top:120px"><div class="caption">Stall keeper</div><div class="num" style="font-size:52px">Bramble</div></div>`;
+  } else {
+    solo.innerHTML = `<img src="cast/wok.png" alt="Old iron wok" style="top:150px;width:640px">
+      <div class="tag" style="left:120px;top:40px"><div class="caption">Cooking tool</div><div class="num" style="font-size:52px">Old iron wok</div></div>`;
+  }
+}
+
+// ---------- focus brackets ----------
+function corner(rot) {
+  return `<svg viewBox="0 0 30 30" style="transform:rotate(${rot}deg)"><path d="M2 2 H28 V11 H11 V28 H2 Z" style="fill:var(--paper);stroke:var(--ink)" stroke-width="4" stroke-linejoin="miter"/></svg>`;
+}
+const focusEl = $('focus');
+focusEl.innerHTML = corner(0) + corner(90) + corner(270) + corner(180);
+function setFocus(i, instant) {
+  focusIdx = i;
+  document.querySelectorAll('.card').forEach((c, j) => c.classList.toggle('lift', j === i));
+  const card = document.querySelectorAll('.card')[i];
+  if (!card) return;
+  // measure the lifted card in screen space (unscaled 1280x720 coordinates)
+  const a = app.getBoundingClientRect(), r = card.getBoundingClientRect(), k = a.width / 1280;
+  const lift = card.classList.contains('lift') && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // getBoundingClientRect may report mid-transition: use the settled box instead
+  const w = card.offsetWidth * (lift ? 1.06 : 1), h = card.offsetHeight * (lift ? 1.06 : 1);
+  const cx = (r.left - a.left) / k + (r.width / k) / 2, cyBase = card.closest('.slot').getBoundingClientRect();
+  const cy = (cyBase.top - a.top) / k + card.offsetHeight / 2 - (lift ? 12 : 0);
+  const gap = 14, L = cx - w / 2 - gap, T = cy - h / 2 - gap, W = w + gap * 2, H = h + gap * 2;
+  if (instant) focusEl.style.transition = 'none';
+  Object.assign(focusEl.style, { left: L + 'px', top: T + 'px', width: W + 'px', height: H + 'px' });
+  const s = focusEl.children;
+  Object.assign(s[0].style, { left: '-16px', top: '-16px' });
+  Object.assign(s[1].style, { right: '-16px', top: '-16px' });
+  Object.assign(s[2].style, { left: '-16px', bottom: '-16px' });
+  Object.assign(s[3].style, { right: '-16px', bottom: '-16px' });
+  if (instant) { void focusEl.offsetWidth; focusEl.style.transition = ''; }
+}
+addEventListener('keydown', e => {
+  if (FRAME || document.body.classList.contains('solo')) return;
+  if (e.key === 'ArrowRight') setFocus((focusIdx + 1) % options.length);
+  else if (e.key === 'ArrowLeft') setFocus((focusIdx + options.length - 1) % options.length);
+  else if (e.key === 'Enter' && document.activeElement === document.body) play();
+});
+$('act').onclick = () => play();
+
+// ---------- loudest moment: freeze, slash, title, hold; under 1.4 s, the only time input is blocked ----------
+let cutTimer = 0;
+function play() {
+  const c = $('cutin');
+  clearTimeout(cutTimer);
+  c.classList.remove('anim', 'on'); void c.offsetWidth;
+  setTimeout(() => {                       // freeze 0.15 s
+    c.classList.add('on', 'anim');
+    app.style.pointerEvents = 'none';
+    cutTimer = setTimeout(() => { c.classList.remove('on', 'anim'); app.style.pointerEvents = ''; }, 200 + 140 + 800);
+  }, 150);
+}
+$('bCut').onclick = () => { if (screen !== 'key-scene' && screen !== 'text-heavy') { scr.value = screen = 'key-scene'; build(); } play(); };
+
+// ---------- screen switcher (outside frame mode) ----------
+const scr = $('scr');
+scr.value = screen;
+scr.onchange = () => { screen = scr.value; build(); };
+
+// ---------- fit the 1280x720 screen to the window (outside frame mode) ----------
+function fit() {
+  if (FRAME) return;
+  const top = 56, k = Math.min(innerWidth / 1280, (innerHeight - top) / 720);
+  app.style.transform = `translate(${Math.max(0, (innerWidth - 1280 * k) / 2)}px, ${top}px) scale(${k})`;
+}
+addEventListener('resize', () => { fit(); if (!document.body.classList.contains('solo')) setFocus(focusIdx, true); });
+fit();
+
+// ---------- idle motion: a small breathing bob on the speaker, ~10 fps, paused when hidden ----------
+let last = 0, t0 = performance.now(), running = false;
+function tick(ms) {
+  if (document.hidden) { running = false; return; }
+  if (ms - last >= 100) {
+    last = ms;
+    const t = (ms - t0) / 1000;
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches)
+      $('customer').style.transform = `scaleY(${1 + 0.008 * Math.sin(t * 2.4)}) rotate(${0.6 * Math.sin(t * 1.2)}deg)`;
+  }
+  requestAnimationFrame(tick);
+}
+function start() { if (!FRAME && !running && !document.hidden) { running = true; requestAnimationFrame(tick); } }
+document.addEventListener('visibilitychange', start);
+
+// ---------- go ----------
+build();
+start();
+if (FRAME) {
+  // wait for every image and font, then two settled frames, then signal the capturer
+  const imgs = [...document.images].filter(i => i.getAttribute('src'));
+  Promise.all(imgs.map(i => i.decode().catch(() => {})))
+    .then(() => document.fonts ? document.fonts.ready : null)
+    .then(() => { layout(); setFocus(focusIdx, true); requestAnimationFrame(() => requestAnimationFrame(() => { document.title = 'ready'; })); });
+}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chunky bright pixel art - demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1E1430; overflow: hidden; }
+  canvas { position: absolute; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #ui { position: fixed; left: 8px; bottom: 8px; display: flex; gap: 6px; align-items: center;
+        font: 14px monospace; color: #FFF4D6; }
+  #ui button { font: 14px monospace; padding: 4px 8px; cursor: pointer; }
+  #ui .sw { width: 14px; height: 14px; display: inline-block; outline: 1px solid #0008; }
+  body.frame #ui { display: none; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="ui"></div>
+<!-- the cast and the beast: ComfyUI sprites cleaned by PixelForge onto the palette (assets/README.md) -->
+<script src="assets/sprites.js"></script>
+<script>
+'use strict';
+// ---------------------------------------------------------------- palette roles
+// The scene is drawn into an INDEXED buffer (one role index per pixel). Colours are looked up only
+// at present time, so a palette swap changes every pixel and nothing can drift off the palette.
+const ROLES = ['ink', 'paper', 'accent', 'signal-good', 'signal-bad', 'signal-rare',
+  'warm-1', 'warm-2', 'warm-3', 'warm-4', 'cool-1', 'cool-2', 'cool-3', 'cool-4', 'bg-sky', 'bg-far'];
+const PALETTES = {
+  market: { 'ink': '#1E1430', 'paper': '#FFF4D6', 'accent': '#FF38B0', 'signal-good': '#6BD94A',
+    'signal-bad': '#FF4B3E', 'signal-rare': '#B67CFF', 'warm-1': '#6B2E3A', 'warm-2': '#B8543A',
+    'warm-3': '#E89A4C', 'warm-4': '#FFD77A', 'cool-1': '#2B2459', 'cool-2': '#33589E',
+    'cool-3': '#3FA0C8', 'cool-4': '#9BE8E4', 'bg-sky': '#BFE0E6', 'bg-far': '#E6C4A4' },
+  dusk: { 'ink': '#150E22', 'paper': '#FCEFE0', 'accent': '#3DF2C8', 'signal-good': '#9BE35A',
+    'signal-bad': '#FF5A4A', 'signal-rare': '#E070FF', 'warm-1': '#5A2448', 'warm-2': '#A63E4E',
+    'warm-3': '#E2765A', 'warm-4': '#FFBE7A', 'cool-1': '#2A1650', 'cool-2': '#3B2E8C',
+    'cool-3': '#4A64C4', 'cool-4': '#7FB0EE', 'bg-sky': '#E8A9A0', 'bg-far': '#B58A9E' },
+  oasis: { 'ink': '#0F1A24', 'paper': '#F4FBEA', 'accent': '#FF40CC', 'signal-good': '#4FE08A',
+    'signal-bad': '#FF5C70', 'signal-rare': '#7CB8FF', 'warm-1': '#4E2832', 'warm-2': '#8A5040',
+    'warm-3': '#C98C52', 'warm-4': '#EED38A', 'cool-1': '#162E46', 'cool-2': '#1E6A6A',
+    'cool-3': '#32A684', 'cool-4': '#A8E8B8', 'bg-sky': '#D8EEDC', 'bg-far': '#B8D6C0' },
+};
+const R = {}; ROLES.forEach((r, i) => { R[r] = i; });
+// one character per role, for sprite strings
+const CH = { k: R.ink, p: R.paper, A: R.accent, G: R['signal-good'], X: R['signal-bad'],
+  V: R['signal-rare'], 1: R['warm-1'], 2: R['warm-2'], 3: R['warm-3'], 4: R['warm-4'],
+  a: R['cool-1'], b: R['cool-2'], c: R['cool-3'], d: R['cool-4'], s: R['bg-sky'], f: R['bg-far'] };
+
+// ---------------------------------------------------------------- indexed frame buffer
+let W = 320, H = 180, buf = new Uint8Array(W * H);
+function setBase(w, h) { W = w; H = h; buf = new Uint8Array(w * h); }
+function px(x, y, c) { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < W && y < H) buf[y * W + x] = c; }
+function rect(x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) px(x + i, y + j, c); }
+function box(x, y, w, h, c) { rect(x, y, w, 1, c); rect(x, y + h - 1, w, 1, c); rect(x, y, 1, h, c); rect(x + w - 1, y, 1, h, c); }
+// dim by a 50% checker of ink: a fixed palette never gets an alpha overlay
+function dither(x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if ((x + i + y + j) % 2 === 0) px(x + i, y + j, c); }
+
+// ---------------------------------------------------------------- sprites
+function grid(w, h) { return { w, h, d: new Int16Array(w * h).fill(-1) }; }
+function gset(g, x, y, c) { if (x >= 0 && y >= 0 && x < g.w && y < g.h) g.d[y * g.w + x] = c; }
+function grect(g, x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) gset(g, x + i, y + j, c); }
+function parse(rows) {
+  const w = Math.max(...rows.map(r => r.length)), g = grid(w, rows.length);
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] !== '.') g.d[y * w + x] = CH[r[x]]; });
+  return g;
+}
+// every sprite gets the same 1 px ink outline on its outside, added by code, never by hand
+function outline(g) {
+  const o = grid(g.w + 2, g.h + 2);
+  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) o.d[(y + 1) * o.w + x + 1] = g.d[y * g.w + x];
+  const src = o.d.slice();
+  for (let y = 0; y < o.h; y++) for (let x = 0; x < o.w; x++) {
+    if (src[y * o.w + x] >= 0) continue;
+    const n = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+      const nx = x + dx, ny = y + dy;
+      return nx >= 0 && ny >= 0 && nx < o.w && ny < o.h && src[ny * o.w + nx] >= 0;
+    });
+    if (n) o.d[y * o.w + x] = R.ink;
+  }
+  return o;
+}
+// idle frame B: one row near the waist is removed and the top drops 1 px (a squash, not a slide)
+function squash(rows) { const i = Math.floor(rows.length * 0.45); const r = rows.slice(); r.splice(i, 1); return [''].concat(r); }
+function spr(g, x, y, flip = false, opt = {}) {
+  const rows = opt.rows || g.h;
+  for (let j = 0; j < rows; j++) for (let i = 0; i < g.w; i++) {
+    const v = g.d[j * g.w + (flip ? g.w - 1 - i : i)];
+    if (v >= 0) px(x + i, y + j, opt.solid !== undefined ? opt.solid : v);
+  }
+}
+
+// ---- cast: generated sprites (assets/sprites.js), already outlined in ink by the cleanup step
+const GEN = window.GEN_SPRITES;
+const S = {};
+function buildSprites() {
+  // walk: contact, passing, contact, passing (legs redrawn by hand from the generated pose)
+  S.player = ['traveller', 'traveller2', 'traveller3', 'traveller4'].map(k => parse(GEN[k]));
+  // idle frame B squashes 1 px; the camel's frame B dips its head (chewing)
+  S.trader = [parse(GEN.trader), parse(squash(GEN.trader))];
+  S.trader2 = [parse(GEN.trader2), parse(squash(GEN.trader2))];
+  S.camel = [parse(GEN.camel), parse(GEN.camelChew)];
+  S.trader2Bust = parse(GEN.trader2Bust);
+  S.crate = outline(crate(18, 14));
+  S.crateSmall = outline(crate(12, 10));
+  S.sack = outline(parse([
+    '....11....', '...2442...', '..234432..', '.23444432.', '2344444332',
+    '2334444332', '2333443322', '2233333322', '.22222222.']));
+  S.pot = outline(parse([
+    '..bbbb..', '...cc...', '.bccddb.', 'bcccddcb', 'bccccccb', 'bbccccbb', '.bbbbbb.']));
+  S.jar = outline(parse(['.aaaa.', '.dddd.', 'cdddcc', 'c3333c', 'cccccb', '.bbbb.']));
+  S.fruit = outline(parse(['.2.2.2.', '2121212', '1212121']));
+  S.rolls = outline(parse(['cdddddddc', 'bccccccbb', '342222243', '231111132']));
+  S.lantern = outline(parse([
+    '....11....', '...2..2...', '..222222..', '.21111112.', '.24pp4442.', '.24ppp442.',
+    '.244pp442.', '.24444442.', '.21111112.', '..222222..', '...1111...']));
+  S.arrow = parse(['AAAAA', '.AAA.', '..A..']);
+  S.awning1 = outline(awning(76, 'c', 'p'));
+  S.awning2 = outline(awning(76, '2', '4'));
+  S.counter = outline(counter(64, 16));
+  S.post = outline(parse(['22', '22', '22'].concat(Array(40).fill('21'))));
+  S.sun = parse(['..4.4..', '.44444.', '4444444', '.44444.', '4444444', '.44444.', '..4.4..']);
+  S.pack = outline(parse(['.111.', '22322', '23332', '22222']));
+  S.coin = outline(parse(['.444.', '44p34', '44434', '43332', '.222.']));
+  S.icons = {
+    lantern: outline(parse(['...22...', '..2..2..', '.222222.', '.24pp42.', '.24pp42.', '.234432.', '.222222.', '..1111..'])),
+    blanket: outline(parse(['........', '.222222.', '23c3c3c2', '2c3c3c32', '23c3c3c2', '.222222.'])),
+    dates: outline(parse(['..2.2...', '.21212..', '.212121.', 'cccccccc', '.bccccb.', '..bbbb..'])),
+    jar: outline(parse(['..aaaa..', '..dddd..', '.cddddc.', '.cccccc.', '.c3333c.', '.cccccc.', '..bbbb..'])),
+    dagger: outline(parse(['......dd', '.....dc.', '....dc..', '...dc...', '.21c....', '212.....', '12......'])),
+    waterbag: outline(parse(['...11...', '...22...', '..2332..', '.233432.', '.233332.', '.223322.', '..2222..'])),
+    salt: outline(parse(['..pppp..', '.pddddp.', '.dddddc.', '.dddddc.', '.cccccc.', '..bbbb..'])),
+    cloth: outline(parse(['.dddddd.', 'cbbbbbbc', 'cbcbcbcc', 'cbbbbbbc', '.cccccc.'])),
+  };
+}
+function crate(w, h) {
+  const g = grid(w, h);
+  grect(g, 0, 0, w, h, R['warm-2']);
+  grect(g, 0, 0, w, 1, R['warm-4']);                 // lit top edge (light from upper left)
+  grect(g, 0, 1, w, 2, R['warm-3']);
+  for (let x = 4; x < w - 1; x += 5) grect(g, x, 3, 1, h - 3, R['warm-1']); // plank seams
+  grect(g, 0, 3, 1, h - 3, R['warm-3']);             // lit left side
+  grect(g, 0, h - 1, w, 1, R['warm-1']);             // shadowed bottom
+  return g;
+}
+function awning(w, a, b) {
+  const g = grid(w, 15), shade = { c: 'b', p: 'd', 2: '1', 4: '3' };
+  for (let x = 0; x < w; x++) {
+    const ch = Math.floor(x / 6) % 2 ? b : a, tab = x % 6;
+    const len = 11 + (tab >= 1 && tab <= 4 ? 2 : 0) + (tab >= 2 && tab <= 3 ? 1 : 0);
+    for (let y = 0; y < len; y++) gset(g, x, y, CH[y >= len - 2 ? shade[ch] : ch]);
+  }
+  grect(g, 0, 0, w, 1, CH[a === 'c' ? 'd' : '4']);   // highlight along the ridge
+  return g;
+}
+function counter(w, h) {
+  const g = grid(w, h);
+  grect(g, 0, 0, w, h, R['warm-2']);
+  grect(g, 0, 0, w, 1, R['warm-4']);
+  grect(g, 0, 1, w, 2, R['warm-3']);
+  for (let y = 7; y < h; y += 4) grect(g, 1, y, w - 2, 1, R['warm-1']);
+  grect(g, 0, h - 1, w, 1, R['warm-1']);
+  return g;
+}
+
+// ---------------------------------------------------------------- 3x5 pixel font (caps, digits, signs)
+const GLYPHS = {
+  A: '.#. #.# ### #.# #.#', B: '##. #.# ##. #.# ##.', C: '.## #.. #.. #.. .##', D: '##. #.# #.# #.# ##.',
+  E: '### #.. ##. #.. ###', F: '### #.. ##. #.. #..', G: '.## #.. #.# #.# .##', H: '#.# #.# ### #.# #.#',
+  I: '### .#. .#. .#. ###', J: '..# ..# ..# #.# .#.', K: '#.# #.# ##. #.# #.#', L: '#.. #.. #.. #.. ###',
+  M: '#.# ### ### #.# #.#', N: '##. #.# #.# #.# #.#', O: '.#. #.# #.# #.# .#.', P: '##. #.# ##. #.. #..',
+  Q: '.#. #.# #.# ##. .##', R: '##. #.# ##. #.# #.#', S: '.## #.. .#. ..# ##.', T: '### .#. .#. .#. .#.',
+  U: '#.# #.# #.# #.# ###', V: '#.# #.# #.# #.# .#.', W: '#.# #.# ### ### #.#', X: '#.# #.# .#. #.# #.#',
+  Y: '#.# #.# .#. .#. .#.', Z: '### ..# .#. #.. ###',
+  0: '### #.# #.# #.# ###', 1: '.#. ##. .#. .#. ###', 2: '##. ..# .#. #.. ###', 3: '##. ..# .#. ..# ##.',
+  4: '#.# #.# ### ..# ..#', 5: '### #.. ##. ..# ##.', 6: '.## #.. ### #.# ###', 7: '### ..# .#. .#. .#.',
+  8: '### #.# ### #.# ###', 9: '### #.# ### ..# ##.',
+  '.': '... ... ... ... .#.', ',': '... ... ... .#. #..', '!': '.#. .#. .#. ... .#.', '?': '##. ..# .#. ... .#.',
+  "'": '.#. .#. ... ... ...', ':': '... .#. ... .#. ...', '-': '... ... ### ... ...', '+': '... .#. ### .#. ...',
+  '/': '..# ..# .#. #.. #..', '(': '.#. #.. #.. #.. .#.', ')': '.#. ..# ..# ..# .#.', '%': '#.# ..# .#. #.. #.#',
+  '[': '##. #.. #.. #.. ##.', ']': '.## ..# ..# ..# .##', '>': '#.. .#. ..# .#. #..', '<': '..# .#. #.. .#. ..#',
+  '*': '... #.# .#. #.# ...', ' ': '... ... ... ... ...',
+};
+const ADV = 4, LINE = 8;                     // 3 px glyph + 1 px gap; 5 px glyph + 3 px leading
+function text(str, x, y, c) {
+  str = String(str).toUpperCase();
+  for (let n = 0; n < str.length; n++) {
+    const g = GLYPHS[str[n]] || GLYPHS['?'], rows = g.split(' ');
+    for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (rows[j][i] === '#') px(x + n * ADV + i, y + j, c);
+  }
+}
+const tw = s => s.length * ADV - 1;
+function wrap(str, max) {
+  const out = []; let line = '';
+  for (const w of str.split(' ')) { if ((line + ' ' + w).trim().length > max) { out.push(line); line = w; } else line = (line + ' ' + w).trim(); }
+  if (line) out.push(line); return out;
+}
+// interface pieces: ink panel, 1 px paper rule inside, so it separates from any backdrop
+function panel(x, y, w, h) { rect(x, y, w, h, R.ink); box(x + 1, y + 1, w - 2, h - 2, R['cool-2']); }
+function chip(label, x, y, role) { const w = tw(label) + 4; rect(x, y, w, 7, role); text(label, x + 2, y + 1, R.ink); return w; }
+
+// ---------------------------------------------------------------- the key scene (320 x 180)
+const GROUND = 108;
+function backdrop() {
+  rect(0, 0, W, H, R['bg-sky']);
+  for (let y = -9; y <= 9; y++) for (let x = -9; x <= 9; x++) if (x * x + y * y <= 80) px(262 + x, 30 + y, R.paper);
+  for (let x = 0; x < W; x++) {           // far dunes: backdrop colour only, no outline
+    const top = 86 + Math.round(5 * Math.sin(x / 26) + 3 * Math.sin(x / 11 + 1));
+    rect(x, top, 1, GROUND - top, R['bg-far']);
+  }
+  for (const [dx, dw] of [[40, 10], [58, 6], [120, 14], [300, 8]]) {   // a far town, same colour
+    const top = 80 - Math.floor(dw / 2);
+    rect(dx, top + Math.floor(dw / 2), dw, 10, R['bg-far']);
+    for (let y = 0; y < dw / 2; y++) { const half = Math.round(Math.sqrt((dw / 2) ** 2 - (dw / 2 - y) ** 2)); rect(dx + dw / 2 - half, top + y, half * 2, 1, R['bg-far']); }
+  }
+  for (const [cx, cy, n] of [[70, 24, 5], [170, 40, 4]]) {   // flat paper clouds, no outline
+    rect(cx, cy, n * 8, 4, R.paper); rect(cx + 6, cy - 3, n * 4, 3, R.paper); rect(cx + 10, cy - 5, n * 2, 2, R.paper);
+  }
+  rect(0, GROUND, W, H - GROUND, R['warm-3']);
+  rect(0, GROUND, W, 1, R['warm-4']);
+  for (let ty = GROUND + 4; ty < H; ty += 12) for (let tx = (ty % 24 ? 0 : 8); tx < W; tx += 22) {
+    rect(tx + 2, ty, 4, 1, R['warm-4']); rect(tx + 12, ty + 6, 3, 1, R['warm-2']);   // sand ripples
+  }
+}
+function shadow(x, y, w) { rect(x + 1, y, w - 2, 1, R['warm-2']); rect(x + 2, y + 1, w - 4, 1, R['warm-2']); }
+function stall(x, groundY, awn, keeper, kf, goods) {
+  const top = groundY - 58;
+  shadow(x - 2, groundY, 70);
+  spr(S.post, x + 2, top + 10); spr(S.post, x + 62, top + 10);
+  spr(keeper, x + 24, groundY - 40);
+  spr(S.counter, x, groundY - 17);
+  goods(x, groundY - 17);
+  spr(awn, x - 6, top);
+}
+// bunting: an ink rope sagging between the stalls, flags in world colours (never accent or signal)
+function bunting(x0, y0, x1, y1, t) {
+  const flags = ['c', '4', '2', 'p'].map(ch => outline(parse([ch.repeat(5), '.' + ch.repeat(3), '..' + ch])));
+  for (let x = x0, n = 0; x <= x1; x++) {
+    const u = (x - x0) / (x1 - x0), y = Math.round(y0 + (y1 - y0) * u + 14 * u * (1 - u));
+    px(x, y, R.ink);
+    if ((x - x0) % 12 === 6) spr(flags[n++ % 4], x - 3, y + (n % 2 ? Math.floor(t / 6) % 2 : 0));
+  }
+}
+function keyScene(t, opt = {}) {
+  setBase(320, 180);
+  backdrop();
+  const bob = Math.floor(t / 3) % 2, chew = Math.floor(t / 5) % 2;
+  stall(14, 146, S.awning1, S.trader[bob], bob, (x, y) => {
+    spr(S.pot, x + 4, y - 8); spr(S.jar, x + 16, y - 7); spr(S.jar, x + 24, y - 7); spr(S.fruit, x + 44, y - 4); spr(S.pot, x + 52, y - 8);
+  });
+  stall(234, 146, S.awning2, S.trader2[1 - bob], bob, (x, y) => {
+    spr(S.rolls, x + 3, y - 5); spr(S.lantern, x + 18, y - 12); spr(S.rolls, x + 44, y - 5);
+  });
+  bunting(86, 92, 228, 92, t);
+  shadow(96, 146, 20); spr(S.crate, 96, 132); spr(S.crateSmall, 100, 120); spr(S.jar, 104, 113);
+  shadow(121, 157, 34); spr(S.camel[chew], 120, 130);
+  shadow(208, 150, 12); spr(S.sack, 208, 140); spr(S.sack, 218, 142);
+  // player: integer position, 4-frame walk
+  const px0 = opt.playerX !== undefined ? opt.playerX : 186, f = opt.walk !== undefined ? opt.walk : 1;
+  shadow(px0 + 1, 165, 14); spr(S.player[f], px0, 141, opt.flip);
+  spr(S.crate, -6, 160); spr(S.crate, 300, 162); spr(S.sack, 12, 166);
+  // accent has one job: what the player can act on now
+  const ay = 90 + (Math.floor(t / 4) % 2);
+  spr(S.arrow, 264, ay);
+  const cw = chip('E TRADE', 251, ay - 9, R.accent);
+  // HUD
+  panel(4, 4, 52, 13); spr(S.coin, 7, 6); text('12,480', 17, 8, R.paper);
+  panel(278, 4, 38, 13); spr(S.sun, 281, 7); text('DAY 3', 291, 8, R.paper);   // the sun high = noon
+  return cw;
+}
+
+// ---------------------------------------------------------------- the text-heavy frame (busiest screen, worst case)
+function textHeavy() {
+  keyScene(0);
+  dither(0, 0, W, H, R.ink);
+  // purse and pack load sit top right, glanced at; the goods take the big panel
+  panel(209, 2, 109, 12);
+  spr(S.coin, 212, 3); text('12,480', 222, 5, R.paper);
+  spr(S.pack, 249, 3); text('38/40', 259, 5, R.paper);
+  rect(282, 6, 32, 3, R['cool-1']); rect(282, 6, 30, 3, R['cool-3']);   // load meter, 38 of 40
+  panel(2, 2, 205, 125);
+  const items = [
+    ['lantern', 'COPPER LANTERN', 'X1', '1,250', 'RARE'],
+    ['blanket', 'WOVEN SADDLE BLANKET', 'X2', '3,400', 'OVERPRICED'],
+    ['dates', 'DRIED DATES', 'X24', '6', 'GOOD DEAL'],
+    ['jar', 'SAFFRON JAR', 'X3', '880', 'RARE'],
+    ['dagger', 'BRASS DAGGER', 'X1', '2,100', ''],
+    ['waterbag', 'GOATSKIN WATER BAG', 'X5', '45', 'GOOD DEAL'],
+    ['salt', 'PINK SALT BLOCK', 'X8', '120', 'OVERPRICED'],
+    ['cloth', 'INDIGO CLOTH ROLL', 'X6', '310', 'RARE'],
+  ];
+  const tagRole = { 'RARE': R['signal-rare'], 'OVERPRICED': R['signal-bad'], 'GOOD DEAL': R['signal-good'] };
+  items.forEach(([icon, name, qty, price, tag], i) => {
+    const y = 10 + i * 14;
+    if (i === 0) { rect(4, y - 4, 201, 13, R['cool-1']); box(4, y - 4, 201, 13, R.accent); }
+    spr(S.icons[icon], 6, y - 2);
+    text(name, 18, y, R.paper); text(qty, 104, y, R['cool-4']);
+    text(price, 146 - tw(price), y, R.paper);
+    if (tag) chip(tag, 154, y - 1, tagRole[tag]);
+  });
+  panel(209, 16, 109, 111);
+  spr(S.lantern, 213, 20);
+  text('COPPER LANTERN', 228, 21, R.paper); text('WEIGHT 3  OWN 0', 228, 29, R['cool-4']);
+  wrap('BURNS NINE NIGHTS ON ONE FLASK OF OIL. SEEN FROM THE NEXT DUNE OVER.', 25).forEach((l, i) => text(l, 213, 41 + i * LINE, R.paper));
+  let cx = 213; cx += chip('RARE', cx, 70, R['signal-rare']) + 3; chip('-22% VS MARKET', cx, 70, R['signal-good']);
+  const btn = (label, x, y, focus) => {
+    rect(x, y, 50, 11, focus ? R.accent : R['cool-1']);
+    if (focus) box(x - 1, y - 1, 52, 13, R.paper);
+    text(label, x + 25 - Math.floor(tw(label) / 2), y + 3, focus ? R.ink : R.paper);
+  };
+  btn('[A] BUY', 213, 98, true); btn('[Y] HAGGLE', 265, 98, false);
+  btn('[X] SELL', 213, 112, false); btn('[B] LEAVE', 265, 112, false);
+  // dialogue: the speaker's portrait and name tab, then her longest line
+  panel(2, 133, 316, 45);
+  rect(6, 137, 26, 26, R['cool-1']); box(6, 137, 26, 26, R['cool-2']);
+  spr(S.trader2Bust, 7, 138);
+  chip('AMBER', 36, 129, R['cool-3']);
+  const line = 'FOR YOU, TRAVELLER, ONLY 1,250. THAT LANTERN CROSSED THE SALT FLATS ON THE BACK OF MY OLDEST BEAST, AND SHE HAS NEVER ONCE CARRIED JUNK. ASK ANYONE IN THE MARKET - ASK THE BEAST HERSELF!';
+  wrap(line, 69).forEach((l, i) => text(l, 36, 141 + i * LINE, R.paper));
+  spr(S.arrow, 309, 170);
+}
+
+// ---------------------------------------------------------------- presentation frames at 160 x 90 (x8)
+// a strip of the market's world: sky, far dunes, sand; the cast and goods stand on it at x8
+function stage(horizon) {
+  rect(0, 0, W, H, R['bg-sky']);
+  for (let y = -5; y <= 5; y++) for (let x = -5; x <= 5; x++) if (x * x + y * y <= 26) px(146 + x, 9 + y, R.paper);
+  for (let x = 0; x < W; x++) {
+    const top = horizon - 6 + Math.round(3 * Math.sin(x / 17) + 2 * Math.sin(x / 7 + 1));
+    rect(x, top, 1, horizon - top, R['bg-far']);
+  }
+  rect(0, horizon, W, H - horizon, R['warm-3']); rect(0, horizon, W, 1, R['warm-4']);
+  for (let ty = horizon + 5; ty < H; ty += 9) for (let tx = (ty % 18 ? 3 : 12); tx < W; tx += 19) {
+    rect(tx, ty, 3, 1, R['warm-4']); rect(tx + 9, ty + 4, 2, 1, R['warm-2']);
+  }
+}
+function stand(g, x, feet, flip) { shadow(x, feet - 1, g.w); spr(g, x, feet - g.h, flip); }
+function characterFrame() {
+  setBase(160, 90);
+  stage(30);
+  // the cast, standing: two traders, the pack beast, the traveller
+  stand(S.trader[0], 12, 50); stand(S.trader2[0], 36, 50);
+  stand(S.camel[0], 64, 50); stand(S.player[0], 118, 50, true);
+  // the traveller's walk, contact / passing / contact / passing, left to right with footprints
+  S.player.forEach((p, i) => {
+    stand(p, 22 + i * 32, 84);
+  });
+}
+function propFrame() {
+  setBase(160, 90);
+  stage(26);
+  // the pack beast and the goods it carries between markets
+  stand(S.camel[0], 6, 62, true);
+  stand(S.crate, 46, 62); spr(S.crateSmall, 49, 62 - 16 - 11); spr(S.jar, 52, 62 - 16 - 11 - 7);
+  stand(S.lantern, 70, 62); stand(S.sack, 86, 62); stand(S.pot, 102, 62);
+  stand(S.rolls, 116, 62); stand(S.fruit, 131, 62); stand(S.jar, 144, 62);
+  // the pack: eight slots, the focused one framed in the accent; the purse beside it
+  panel(4, 67, 152, 21);
+  Object.values(S.icons).forEach((g, i) => {
+    const sx = 8 + i * 13;
+    rect(sx, 71, 12, 13, R['cool-1']);
+    if (i === 0) box(sx - 1, 70, 14, 15, R.accent);
+    spr(g, sx + 6 - (g.w >> 1), 77 - (g.h >> 1));
+  });
+  spr(S.coin, 116, 74); text('12,480', 126, 75, R.paper);
+}
+
+// ---------------------------------------------------------------- present: indexed buffer -> integer-scaled canvas
+let palName = 'market', baseCanvas = null;
+function rgbOf(hex) { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)); }
+function toImageData(ctx) {
+  const lut = ROLES.map(r => rgbOf(PALETTES[palName][r])), img = ctx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) { const c = lut[buf[i]]; img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255; }
+  return img;
+}
+function present() {
+  const view = document.getElementById('view'), dpr = window.devicePixelRatio || 1;
+  if (!baseCanvas) baseCanvas = document.createElement('canvas');
+  baseCanvas.width = W; baseCanvas.height = H;
+  const bctx = baseCanvas.getContext('2d');
+  bctx.putImageData(toImageData(bctx), 0, 0);
+  // integer scale only, computed in device pixels; leftover space becomes a border
+  const scale = Math.max(1, Math.floor(Math.min(innerWidth * dpr / W, innerHeight * dpr / H)));
+  view.width = W * scale; view.height = H * scale;
+  view.style.width = (W * scale / dpr) + 'px'; view.style.height = (H * scale / dpr) + 'px';
+  view.style.left = Math.floor((innerWidth - W * scale / dpr) / 2) + 'px';
+  view.style.top = Math.floor((innerHeight - H * scale / dpr) / 2) + 'px';
+  const ctx = view.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(baseCanvas, 0, 0, W * scale, H * scale);
+  document.body.style.background = PALETTES[palName].ink;
+  return ctx;
+}
+
+// ---------------------------------------------------------------- the "don't" frame: same scene, rules broken
+function dontFrame() {
+  keyScene(0);
+  const view = document.getElementById('view');
+  present();
+  view.width = 1280; view.height = 720; view.style.width = '1280px'; view.style.height = '720px';
+  view.style.left = '0px'; view.style.top = '0px';
+  const ctx = view.getContext('2d');
+  ctx.imageSmoothingEnabled = true;                                   // blur
+  ctx.drawImage(baseCanvas, 0, 0, 300, 169, 0, 0, 1280, 720);         // non-integer x4.27
+  const g = ctx.createLinearGradient(0, 0, 0, 380);                   // off-palette gradient sky glow
+  g.addColorStop(0, 'rgba(255,120,40,0.55)'); g.addColorStop(1, 'rgba(120,40,200,0.0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 380);
+  const r = ctx.createRadialGradient(1100, 130, 10, 1100, 130, 260);
+  r.addColorStop(0, 'rgba(255,255,200,0.9)'); r.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = r; ctx.fillRect(800, 0, 480, 400);
+  // a sprite at double pixel size beside ones at game size (mixed scales)
+  const blit = (g, dx, dy, k, rot) => {
+    const tmp = document.createElement('canvas'); tmp.width = g.w; tmp.height = g.h;
+    setBase(g.w, g.h); spr(g, 0, 0);
+    const tctx = tmp.getContext('2d'), img = toImageData(tctx);
+    for (let i = 0; i < g.w * g.h; i++) if (g.d[i] < 0) img.data[i * 4 + 3] = 0;   // keep the sprite's clear pixels clear
+    tctx.putImageData(img, 0, 0);
+    ctx.save(); ctx.translate(dx, dy); ctx.rotate(rot); ctx.imageSmoothingEnabled = rot !== 0;
+    ctx.drawImage(tmp, 0, 0, g.w * k, g.h * k); ctx.restore();
+  };
+  blit(S.camel[0], 380, 430, 9, 0);
+  // a rotated sprite at a sub-pixel position, smoothed
+  blit(S.player[1], 803.37, 571.6, 5.3, 0.16);
+  // soft drop shadow and a glow outline in a colour not in the palette
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 18;
+  ctx.fillStyle = '#7a5cff'; ctx.fillRect(1004.5, 300.5, 120, 34); ctx.shadowBlur = 0;
+  // tiny anti-aliased system text, off the pixel grid
+  ctx.font = '9px sans-serif'; ctx.fillStyle = '#ffffff';
+  ctx.fillText('Trade (press E) — 12480 coins — Day 3, noon', 1009.3, 321.7);
+  ctx.font = 'italic 13px serif'; ctx.fillStyle = '#d8d8d8'; ctx.fillText('coins: 12,480', 18.4, 30.6);
+}
+
+// ---------------------------------------------------------------- boot
+const FRAMES = { 'key-scene': () => keyScene(0), 'character': characterFrame, 'prop': propFrame, 'text-heavy': textHeavy };
+function boot() {
+  buildSprites();
+  const q = new URLSearchParams(location.search), frame = q.get('frame');
+  if (q.get('palette') && PALETTES[q.get('palette')]) palName = q.get('palette');
+  if (frame) {
+    document.body.classList.add('frame');
+    if (frame === 'dont') dontFrame();
+    else { (FRAMES[frame] || FRAMES['key-scene'])(); present(); }
+    document.title = 'ready';
+    return;
+  }
+  const ui = document.getElementById('ui');
+  const draw = () => {
+    ui.innerHTML = 'palette: ' + Object.keys(PALETTES).map(n => `<button data-p="${n}"${n === palName ? ' disabled' : ''}>${n}</button>`).join('') +
+      ' ' + ROLES.map(r => `<span class="sw" title="${r}" style="background:${PALETTES[palName][r]}"></span>`).join('');
+  };
+  ui.addEventListener('click', e => { const p = e.target.dataset && e.target.dataset.p; if (p) { palName = p; draw(); } });
+  draw();
+  // animation: at most 10 fps, paused while the tab is hidden; the player walks on integer pixels
+  let t = 0, timer = null;
+  const step = () => {
+    const span = 40, k = t % (span * 2), x = 166 + (k < span ? k : span * 2 - k);
+    keyScene(t, { playerX: x, walk: [0, 1, 2, 3][Math.floor(t / 1.25) % 4], flip: k >= span });
+    present(); t++;
+  };
+  const run = () => { if (!timer) timer = setInterval(step, 100); };
+  const stop = () => { clearInterval(timer); timer = null; };
+  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : run()));
+  addEventListener('resize', present);
+  step(); run();
+}
+if (typeof document !== 'undefined' && !window.__NO_BOOT) boot();
+</script>
+</body>
+</html>

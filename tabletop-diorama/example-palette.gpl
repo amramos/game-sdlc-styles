@@ -1,0 +1,30 @@
+GIMP Palette
+Name: tabletop-diorama - example (sunny kitchen)
+Columns: 4
+# One instance of the colour structure in style.md, for a bakery street on a sunny kitchen table.
+# Never ship it as is: every game re-chooses each role for its own tone and lighting. demo.html's
+# candlelight and morning palettes fill the same roles and pass the same rules.
+# Checked with the colour-rules (value = HSV V, chroma = S x V, contrast = WCAG ratio):
+#   ink on paper 13.4:1; each signal on paper >= 6.3:1
+#   paint chroma 0.19-0.58 (limits 0.15-0.60); paint value 0.48-0.91, spread 0.43
+#   wood-bare chroma 0.25, value 0.90; wood-bare on table 2.43:1
+#   table chroma 0.30 (paint max 0.58), value 0.64; every paint separates from the table
+#   room vs table value 0.21; room chroma 0.13
+#   key value 1.00, chroma 0.16; fill chroma 0.16; paper value 0.96, chroma 0.11
+#   accent chroma 0.72 vs paint max 0.58; accent hue 60 deg from the table, >= 39 deg from every paint
+217 205 184	room         #D9CDB8
+164 126  88	table        #A47E58
+230 207 166	wood-bare    #E6CFA6
+194  69  47	paint-red    #C2452F
+212 162  74	paint-ochre  #D4A24A
+ 62 110 158	paint-blue   #3E6E9E
+ 94 140  74	paint-green  #5E8C4A
+232 218 184	paint-cream  #E8DAB8
+122  78  46	paint-brown  #7A4E2E
+255 241 214	key          #FFF1D6
+184 204 224	fill         #B8CCE0
+244 236 216	paper        #F4ECD8
+ 43  33  24	ink          #2B2118
+163  38  26	signal-warn  #A3261A
+ 47  93  52	signal-ok    #2F5D34
+232  48 140	accent       #E8308C

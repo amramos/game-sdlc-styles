@@ -1,0 +1,18 @@
+GIMP Palette
+Name: loud-ink-cast-quiet-stage - example
+Columns: 4
+# One instance of the colour structure in style.md. Never ship it as is: every game re-chooses
+# each role for its own tone. Checked: ink on paper 15.1:1; ink on each signal 8.3-11.7:1;
+# stage chroma <= 0.10 < shadow 0.16 < accent 0.89 (value = HSV V, chroma = S x V).
+ 18  22  36	ink            #121624
+242 234 219	paper          #F2EADB
+255  74  28	accent         #FF4A1C
+127 178 255	signal-sky     #7FB2FF
+255 201  60	signal-sun     #FFC93C
+ 60 203 152	signal-jade    #3CCB98
+ 18  51  58	shadow         #12333A
+ 58  42  32	stage-wood     #3A2A20
+ 59  61  62	stage-concrete #3B3D3E
+ 44  50  54	stage-metal    #2C3236
+ 48  56  46	stage-tile     #30382E
+ 62  53  40	stage-canvas   #3E3528

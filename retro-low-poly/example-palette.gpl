@@ -1,0 +1,38 @@
+GIMP Palette
+Name: retro-low-poly - example (roadside diner, sunny afternoon)
+Columns: 4
+# One instance of the colour structure in style.md. Never ship it as is: every game re-chooses
+# each role for its own tone and lighting. demo.html's "night" palette fills the same roles.
+# Checked against every colour-rule (value = HSV V, chroma = S x V, contrast = WCAG ratio):
+#   ink on panel 14.8:1; ink on each signal 6.0-10.5:1
+#   material value spread 0.76 (0.19-0.95); every material pair distinct
+#   fog value 0.96 vs mean material value 0.68: distance 0.28
+#   sky on fog 1.79:1; key value 1.00, chroma 0.15; ambient value 0.66, key - ambient 0.34
+#   accent chroma 0.76, accent on fog 3.8:1; accent hue >= 59 deg from every coloured role
+#   glow value 1.00
+ 28  24  36	ink                  #1C1824
+244 236 216	panel                #F4ECD8
+255 242 216	key                  #FFF2D8
+138 148 168	ambient              #8A94A8
+221 238 245	fog                  #DDEEF5
+127 184 224	sky                  #7FB8E0
+255  90  80	glow-sign            #FF5A50
+255 200  80	glow-jukebox         #FFC850
+240 250 255	glow-tube            #F0FAFF
+162  60 255	accent               #A23CFF
+134 216 144	signal-ok            #86D890
+242 194  78	signal-warn          #F2C24E
+242 112  96	signal-danger        #F27060
+134 184 242	signal-info          #86B8F2
+224 204 160	material-floor-light #E0CCA0
+ 42  42  48	material-floor-dark  #2A2A30
+143 207 191	material-wall        #8FCFBF
+122  78  46	material-wood        #7A4E2E
+176  42  52	material-vinyl       #B02A34
+196 204 214	material-chrome      #C4CCD6
+226 202 122	material-formica     #E2CA7A
+198 132  98	material-skin        #C68462
+242 240 234	material-cloth       #F2F0EA
+ 58 134 184	material-paint       #3A86B8
+154  90  72	material-brick       #9A5A48
+ 78  80  88	material-asphalt     #4E5058

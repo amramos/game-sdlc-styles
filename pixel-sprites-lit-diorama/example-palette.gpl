@@ -1,0 +1,40 @@
+GIMP Palette
+Name: pixel-sprites-lit-diorama - example (day market)
+Columns: 4
+# One instance of the colour structure in style.md. Never ship it as is: every game re-chooses
+# each role, and its lighting, for its own tone. demo.html's night palette fills the same roles.
+# Checked against style.md's colour-rules (value = HSV V, chroma = S x V, contrast = WCAG ratio):
+#   ink on plate 15.5:1; accent and signals on plate >= 5.4:1; ink and accent on the caption backing
+#   (plate at 85% over white) >= 4.9:1
+#   chroma of sky, fog, ground, material-* max 0.37 (ceiling 0.40); sprites max 0.58 (set + 0.21)
+#   value of ground, material-* max 0.78 (ceiling 0.80); glow-lamp 1.00
+#   outline V 0.14; ground - outline 0.58; outline on fog 11.8:1
+#   tint V 1.00, chroma 0.08; accent chroma 0.66 (set max 0.37); accent hue >= 40 deg from every coloured set role and signal
+# key, fill-sky, fill-ground and rim are the lighting scheme: no rule, the game picks them.
+156 200 232	sky              #9CC8E8
+201 220 230	fog              #C9DCE6
+255 241 216	key              #FFF1D8
+207 226 242	fill-sky         #CFE2F2
+138 122 102	fill-ground      #8A7A66
+255 255 255	rim              #FFFFFF
+255 226 168	glow-lamp        #FFE2A8
+185 165 138	ground           #B9A58A
+200 184 160	material-plaster #C8B8A0
+176 112  82	material-roof    #B07052
+138 100  72	material-wood    #8A6448
+154 150 140	material-stone   #9A968C
+110 148  80	material-leaf    #6E9450
+ 79 127 168	material-cloth   #4F7FA8
+191 160  96	material-cloth2  #BFA060
+ 34  28  36	outline          #221C24
+255 246 234	tint             #FFF6EA
+224 168 130	sprite-skin      #E0A882
+ 74  48  32	sprite-hair      #4A3020
+208  72  60	sprite-cloth-a   #D0483C
+ 60 120 200	sprite-cloth-b   #3C78C8
+237 230 214	sprite-cloth-c   #EDE6D6
+ 25 194 160	accent           #19C2A0
+240  96  72	signal-danger    #F06048
+138 180 248	signal-info      #8AB4F8
+246 241 230	ink              #F6F1E6
+ 28  24  32	plate            #1C1820

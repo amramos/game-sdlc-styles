@@ -1,0 +1,30 @@
+GIMP Palette
+Name: toybox-low-poly - example (autumn mushroom village)
+Columns: 4
+# One instance of the colour structure in style.md. Never ship it as is: every game re-chooses
+# each role for its own tone. demo.html's spring and winter palettes fill the same roles.
+# Checked with the colour-rules (value = HSV V, chroma = S x V, contrast = WCAG ratio):
+#   ink on paper 12.6:1; ink on each signal 6.8-9.3:1
+#   chroma of material-*, ground, path, sky-*, paper <= 0.42 (ceiling 0.45)
+#   value of material-*, ground, path 0.66-0.96; sky min 0.90; material value spread 0.30
+#   accent chroma 0.69 vs material max 0.42; accent hue >= 40 deg from every coloured role
+#   shadow V 0.52, chroma 0.16; ground - shadow value 0.23; path on ground 1.50:1
+ 47  42  61	ink              #2F2A3D
+251 244 230	paper            #FBF4E6
+168 198 230	sky-top          #A8C6E6
+247 222 201	sky-low          #F7DEC9
+169 191 136	ground           #A9BF88
+238 221 187	path             #EEDDBB
+ 96  93 133	shadow           #605D85
+ 19 196 180	accent           #13C4B4
+166 221 160	signal-ok        #A6DDA0
+247 207 122	signal-warn      #F7CF7A
+242 160 160	signal-blocked   #F2A0A0
+169 201 245	signal-info      #A9C9F5
+229 147 126	material-cap     #E5937E
+244 232 214	material-stem    #F4E8D6
+168 130  98	material-wood    #A88262
+234 194 126	material-leaf    #EAC27E
+198 183 113	material-foliage #C6B771
+185 181 198	material-stone   #B9B5C6
+143 169 214	material-cloth   #8FA9D6

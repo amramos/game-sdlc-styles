@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel sprites in a lit diorama</title>
+<style>
+  :root { --ink:#F6F1E6; --plate:#1C1820; --accent:#19C2A0; --danger:#F06048; --info:#8AB4F8;
+          --plate-90:rgba(28,24,32,.9); --plate-85:rgba(28,24,32,.85); --plate-60:rgba(28,24,32,.6); }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--plate); }
+  body { font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif; color:var(--ink); }
+  canvas#c { display:block; position:absolute; left:0; top:0; }
+  /* frame mode: a fixed 1280x720 canvas pinned at the page's top-left, whatever the viewport */
+  body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
+  body.frame #ui { position:fixed; transform:none !important; }
+  body.frame * { transition:none !important; }
+
+  #ui { position:absolute; left:0; top:0; width:1280px; height:720px; transform-origin:0 0; pointer-events:none; overflow:hidden; }
+
+  /* stage captions: live text in the world on a soft dark plate (85%), so they pass 4.5:1 over any surface */
+  .cap { position:absolute; left:0; top:0; max-width:240px; text-align:center; line-height:1.2; box-sizing:border-box;
+         padding:3px 9px 4px; border-radius:4px; background:var(--plate-85);
+         box-shadow:0 0 10px 2px var(--plate-60); text-shadow:0 1px 2px var(--plate); }
+  .cap b { display:block; font-weight:600; font-size:17px; font-variant:small-caps; letter-spacing:.06em; }
+  .cap i { display:block; font-size:16px; }
+  .cap .s { display:none; }
+  .cap.short .n, .cap.short i { display:none; }
+  .cap.short .s { display:inline; }
+  .cap.sel b { color:var(--accent); }
+  .cap.hidden { display:none; }
+  .cap.off { visibility:hidden; }
+
+  /* letterbox and lower-third title card for close-ups */
+  .bar { position:absolute; left:0; width:1280px; height:64px; background:#000; transition:transform 1.2s ease; }
+  #barT { top:0; transform:translateY(-64px); }  #barB { bottom:0; transform:translateY(64px); }
+  #ui.close #barT, #ui.close #barB { transform:none; }
+  #card { position:absolute; left:50%; bottom:88px; transform:translateX(-50%); max-width:760px; text-align:center;
+          padding:10px 26px; background:linear-gradient(90deg, transparent, var(--plate-90) 18%, var(--plate-90) 82%, transparent);
+          opacity:0; transition:opacity .8s ease; }
+  #ui.close #card { opacity:1; }
+  #card b { display:block; font-size:24px; font-weight:600; font-variant:small-caps; letter-spacing:.08em; }
+  #card i { display:block; font-size:17px; margin-top:2px; }
+  #ui.close .cap { display:none; }
+
+  /* the busiest screen */
+  #hud { display:none; }
+  #ui.heavy #hud { display:block; }
+  .box { box-sizing:border-box; }
+  .panel { background:linear-gradient(90deg, var(--plate-90), var(--plate-60)); border-left:2px solid var(--ink); }
+  #topcol { position:absolute; left:16px; top:14px; width:860px; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+  .status { display:flex; align-items:center; gap:4px 20px; padding:6px 14px; font-size:17px; }
+  .status span { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .status b { font-weight:700; }
+  svg.ic { width:20px; height:20px; flex:none; shape-rendering:crispEdges; }
+  .meter { display:inline-block; width:64px; height:8px; border:1.5px solid var(--ink); position:relative; }
+  .meter i { position:absolute; left:1px; top:1px; bottom:1px; background:var(--ink); }
+  .chip { display:flex; align-items:center; gap:8px; padding:5px 12px 5px 8px; font-size:17px; max-width:860px; }
+  .chip b { font-weight:700; }
+  .chip.danger { color:var(--danger); border-left-color:var(--danger); } .chip.danger span.t { color:var(--ink); }
+  .chip.info { color:var(--info); border-left-color:var(--info); } .chip.info span.t { color:var(--ink); }
+  /* the order slip: a paper chit pinned over the scene, ink on paper */
+  #rightcol { position:absolute; right:22px; top:16px; width:330px; display:flex; flex-direction:column; gap:14px; }
+  #detail { position:relative; padding:14px 18px 18px; font-size:16px; line-height:1.3;
+            background:var(--paper); color:var(--plate); transform:rotate(1.2deg);
+            clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),94% 100%,88% calc(100% - 7px),82% 100%,76% calc(100% - 7px),70% 100%,64% calc(100% - 7px),58% 100%,52% calc(100% - 7px),46% 100%,40% calc(100% - 7px),34% 100%,28% calc(100% - 7px),22% 100%,16% calc(100% - 7px),10% 100%,4% calc(100% - 7px),0 100%); }
+  #detail .pin { position:absolute; left:50%; top:5px; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:var(--danger); }
+  #detail h2 { margin:6px 0 0; font-size:22px; font-weight:700; font-variant:small-caps; letter-spacing:.05em; line-height:1.15; }
+  #detail .role { margin:0 0 8px; font-style:italic; }
+  #detail h3 { margin:8px 0 3px; font-size:16px; font-weight:700; font-variant:small-caps; letter-spacing:.1em; border-bottom:1.5px solid var(--plate); }
+  #detail ul { list-style:none; margin:0; padding:0; }
+  #detail li { display:flex; justify-content:space-between; gap:10px; border-bottom:1px dashed rgba(28,24,32,.35); padding:1px 0; }
+  #detail li b { font-weight:700; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  #detail svg path[fill="var(--plate)"] { fill:var(--paper); }
+  #detail .gain { display:flex; gap:16px; font-weight:700; }
+  #detail .gain span { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  #keys { display:flex; flex-wrap:wrap; gap:6px 16px; padding:7px 12px; font-size:16px; }
+  kbd { font-family:inherit; font-size:16px; font-weight:700; padding:0 6px; border:1.5px solid var(--ink); border-bottom-width:3px; margin-right:5px; }
+  #strip { position:absolute; left:16px; bottom:14px; display:flex; gap:8px; }
+  .face { width:200px; display:flex; gap:8px; align-items:center; padding:6px 8px; }
+  .face canvas { width:48px; height:48px; image-rendering:pixelated; flex:none; background:var(--plate); }
+  .face b { display:block; font-size:16px; font-weight:700; font-variant:small-caps; letter-spacing:.04em; line-height:1.15; }
+  .face i { display:flex; align-items:center; gap:5px; font-size:16px; line-height:1.15; }
+  .face.sel { border-left-color:var(--accent); } .face.sel b { color:var(--accent); }
+
+  /* demo controls, hidden in frame mode */
+  #controls { position:absolute; right:12px; bottom:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; z-index:5; }
+  #controls label, #controls button, #controls select { font:inherit; font-size:15px; color:var(--ink); background:var(--plate);
+    border:1.5px solid var(--ink); border-radius:4px; padding:5px 10px; }
+  #controls button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+  body.frame #controls { display:none; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <div id="captions"></div>
+  <div id="hud">
+    <div id="topcol">
+      <div class="status panel box">
+        <span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M4 0h2v2H4zM4 8h2v2H4zM0 4h2v2H0zM8 4h2v2H8zM3 3h4v4H3zM1 1h1v1H1zM8 1h1v1H8zM1 8h1v1H1zM8 8h1v1H8z"/></svg>Day <b>12</b> · <b>10:40</b></span>
+        <span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M3 0h4v1h1v1h1v6H8v1H7v1H3V9H2V8H1V2h1V1h1z"/><path fill="var(--plate)" d="M4 2h2v1H4zM3 3h1v4H3zM4 7h2v1H4zM6 3h1v1H6z"/></svg><b>1,284</b></span>
+        <span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M0 1h10v3H0zM1 4h1v6H1zM8 4h1v6H8zM2 6h6v1H2z"/><path fill="var(--plate)" d="M2 1h2v3H2zM6 1h2v3H6z"/></svg><b>3 / 3</b></span>
+        <span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M4 0h2v3h4v2H8v1h1v4H7V9H3v1H1V6h1V5H0V3h4z"/></svg><b>Trusted</b><span class="meter"><i style="width:80%"></i></span></span>
+      </div>
+      <div class="chip danger panel box"><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M3 0h3v1h1v1h2v3H0V2h1V1h2zM1 6h1v2H1zM4 7h1v2H4zM7 6h1v2H7z"/></svg><b>Rain in 1 h</b><span class="t">cover the figs</span></div>
+      <div class="chip info panel box"><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M0 1h2v1h8v4H2v1h7v1H1V2H0zM2 8h2v2H2zM7 8h2v2H7z"/></svg><b>Buyer at noon</b><span class="t">long order</span></div>
+    </div>
+    <div id="rightcol">
+    <div id="detail" class="box">
+      <span class="pin"></span>
+      <h2>Tomasina Ferreira-Valcourt</h2>
+      <div class="role">Flower broker, lower town</div>
+      <h3>Order</h3>
+      <ul>
+        <li><span>Potted rosemary</span><b>6 × 14</b></li>
+        <li><span>Dried lavender bundles</span><b>12 × 5</b></li>
+        <li><span>Fresh figs, ripe today</span><b>2 baskets × 30</b></li>
+        <li><span>Marigold seed packets</span><b>20 × 2</b></li>
+        <li><span>Lemon thyme, cut</span><b>4 bunches × 6</b></li>
+      </ul>
+      <h3>If you agree</h3>
+      <div class="gain"><span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M4 0h2v3h4v2H8v1h1v4H7V9H3v1H1V6h1V5H0V3h4z"/></svg>+40</span><span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M3 0h4v1h1v1h1v6H8v1H7v1H3V9H2V8H1V2h1V1h1z"/><path fill="var(--plate)" d="M4 2h2v1H4zM3 3h1v4H3zM4 7h2v1H4zM6 3h1v1H6z"/></svg>+268</span><span><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M0 1h10v3H0zM1 4h1v6H1zM8 4h1v6H8zM2 6h6v1H2z"/><path fill="var(--plate)" d="M2 1h2v3H2zM6 1h2v3H6z"/></svg>herbs −2</span></div>
+    </div>
+    <div id="keys" class="panel box"><span><kbd>E</kbd>Trade</span><span><kbd>Q</kbd>Ask about rain</span><span><kbd>Tab</kbd>Next</span></div>
+    </div>
+    <div id="strip">
+      <div class="face panel box sel" data-who="shopper"><canvas width="16" height="16"></canvas><div><b>Tomasina</b><i>Waiting</i></div></div>
+      <div class="face panel box" data-who="vendor"><canvas width="16" height="16"></canvas><div><b>Mira</b><i><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M3 0h3v1h1v1h2v3H0V2h1V1h2zM1 6h1v2H1zM4 7h1v2H4zM7 6h1v2H7z"/></svg>Worried</i></div></div>
+      <div class="face panel box" data-who="elder"><canvas width="16" height="16"></canvas><div><b>Old Anselm</b><i>Watching sky</i></div></div>
+      <div class="face panel box" data-who="kid"><canvas width="16" height="16"></canvas><div><b>Pip</b><i><svg class="ic" viewBox="0 0 10 10"><path fill="currentColor" d="M3 0h4v1h1v1h1v6H8v1H7v1H3V9H2V8H1V2h1V1h1z"/><path fill="var(--plate)" d="M4 2h2v1H4zM3 3h1v4H3zM4 7h2v1H4zM6 3h1v1H6z"/></svg>On errands</i></div></div>
+    </div>
+  </div>
+  <div class="bar" id="barT"></div><div class="bar" id="barB"></div>
+  <div id="card"><b>Tomasina Ferreira-Valcourt</b><i>"Six pots of rosemary before the rain, and I'll pay double."</i></div>
+</div>
+
+<div id="controls">
+  <label>Palette <select id="pal"></select></label>
+  <button id="bTilt" aria-pressed="true">Tilt-shift</button>
+  <button id="bClose" aria-pressed="false">Close-up</button>
+  <button id="bHeavy" aria-pressed="false">Busiest screen</button>
+</div>
+
+<!-- Palettes: each fills the same roles and passes style.md's colour-rules (checked by script).
+     "light" holds the lighting scheme: intensities and directions belong to the palette, i.e. to the game. -->
+<script type="application/json" id="palettes">
+{
+ "day": {"label":"Day market",
+  "sky":"#9CC8E8","fog":"#C9DCE6","key":"#FFF1D8","fill-sky":"#CFE2F2","fill-ground":"#8A7A66","rim":"#FFFFFF",
+  "glow-lamp":"#FFE2A8","ground":"#B9A58A",
+  "material-plaster":"#C8B8A0","material-roof":"#B07052","material-wood":"#8A6448","material-stone":"#9A968C",
+  "material-leaf":"#6E9450","material-cloth":"#4F7FA8","material-cloth2":"#BFA060",
+  "outline":"#221C24","tint":"#FFF6EA",
+  "sprite-skin":"#E0A882","sprite-hair":"#4A3020","sprite-cloth-a":"#D0483C","sprite-cloth-b":"#3C78C8","sprite-cloth-c":"#EDE6D6",
+  "accent":"#19C2A0","signal-danger":"#F06048","signal-info":"#8AB4F8","ink":"#F6F1E6","plate":"#1C1820",
+  "light":{"key":2.8,"keyPos":[-9,14,7],"hemi":1.25,"rim":0.4,"rimPos":[7,9,-12],"fog":0.0085,"lampsLit":0,"lamp":0,
+           "grade":0.15,"vignette":0.35,"shafts":0.025,"mist":0.05}},
+ "night": {"label":"Night market, one warm light",
+  "sky":"#2E3E5C","fog":"#52617A","key":"#9DB4D4","fill-sky":"#5A6E90","fill-ground":"#1A2030","rim":"#7F96B6",
+  "glow-lamp":"#FFC070","ground":"#3A4254",
+  "material-plaster":"#6E7486","material-roof":"#6A4C52","material-wood":"#4E4448","material-stone":"#5A6070",
+  "material-leaf":"#3E5A50","material-cloth":"#3C5A80","material-cloth2":"#6E5A62",
+  "outline":"#0A0B10","tint":"#B8C4D8",
+  "sprite-skin":"#C8957A","sprite-hair":"#2E2430","sprite-cloth-a":"#B84A48","sprite-cloth-b":"#3A6AA8","sprite-cloth-c":"#B8B4AC",
+  "accent":"#7FE05A","signal-danger":"#F04858","signal-info":"#7FC8F0","ink":"#EEF0F4","plate":"#0C0E14",
+  "light":{"key":3.6,"keyPos":[-10,15,4],"hemi":4.0,"rim":1.0,"rimPos":[8,10,-14],"fog":0.012,"lampsLit":1,"lamp":14,
+           "grade":0.3,"vignette":0.7,"shafts":0.06,"mist":0.1}}
+}
+</script>
+
+<!-- The cast: ComfyUI sprites cleaned onto the sprite roles with PixelForge (assets/README.md). -->
+<script src="assets/images.js"></script>  <!-- images embedded so WebGL accepts them from file:// -->
+<script src="assets/sprites.js"></script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
+import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
+
+// ---------- setup ----------
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const FRAME = ['key-scene', 'character', 'prop', 'text-heavy', 'dont'].includes(params.get('frame')) ? params.get('frame') : null;
+const DONT = FRAME === 'dont';
+const PALETTES = JSON.parse($('palettes').textContent);
+const SPRITE_IDS = ['vendor', 'shopper', 'elder', 'kid'];
+const SPRITES = {};                                   // id -> ImageData of the cleaned sprite, in day colours
+let palName = PALETTES[params.get('palette')] ? params.get('palette') : 'day';
+const pal = () => PALETTES[palName];
+if (FRAME) document.body.classList.add('frame');
+const W = 1280, H = 720, FIXED_T = 2.0;
+const ui = $('ui');
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(20261107);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const rgbaOf = (h, a) => { const c = new THREE.Color(h).convertLinearToSRGB(); return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`; };
+const hexMix = (a, b, t) => '#' + new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString();
+
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.toneMapping = THREE.NoToneMapping;          // palette colours land as authored; lights are tuned to it
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, W / H, 0.3, 600);
+const HOME = { pos: new THREE.Vector3(-1.4, 6.0, 12.8), look: new THREE.Vector3(0.4, 0.2, -3.0) };
+
+// ---------- textures drawn in code ----------
+function canvasTex(c, repeat) {
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
+  return t;
+}
+// brushy grain: short pale strokes on white, multiplied into every set material (never noise on sprites)
+function grainCanvas(seed, w = 128, h = 128, n = 900) {
+  const c = mkCanvas(w, h), x = c.getContext('2d'), r = mulberry32(seed);
+  x.fillStyle = '#fff'; x.fillRect(0, 0, w, h);
+  for (let i = 0; i < n; i++) { const g = 196 + (r() * 59 | 0);
+    x.fillStyle = `rgba(${g},${g},${g},0.35)`; x.fillRect(r() * w | 0, r() * h | 0, 4 + (r() * 18 | 0), 1 + (r() * 2 | 0)); }
+  return c;
+}
+const grainTex = canvasTex(grainCanvas(7));
+// tileable value maps made in MaterialCraft (assets/README.md): 128 px, four values (0.60-1.00) that
+// multiply the role colour, so a surface keeps its palette role in every palette. Point-sampled up close.
+const loading = new THREE.LoadingManager();
+const texLoader = new THREE.TextureLoader(loading);
+function valueMap(name) {
+  const t = texLoader.load(IMG(`assets/textures/${name}.png`)); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = 4; return t;
+}
+const TEX = { floor: valueMap('floor-tiles'), roof: valueMap('roof-tiles'), plaster: valueMap('plaster'), wood: valueMap('wood-planks') };
+const TILE = { floor: 4, roof: 2.4, plaster: 8, wood: 2 };   // world units one map covers (128 texels)
+// box UVs in world units, so every face shows the map at one texel size whatever the box's size
+function worldUV(geo, tile, ox = 0, oy = 0, oz = 0) {
+  const pos = geo.attributes.position, nor = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) + ox, y = pos.getY(i) + oy, z = pos.getZ(i) + oz, ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i));
+    if (ax > 0.5) uv.setXY(i, z / tile, y / tile); else if (ay > 0.5) uv.setXY(i, x / tile, z / tile); else uv.setXY(i, x / tile, y / tile);
+  }
+  uv.needsUpdate = true; return geo;
+}
+function radialTex(inner = 0, soft = 1) {
+  const c = mkCanvas(64, 64), x = c.getContext('2d'), g = x.createRadialGradient(32, 32, inner * 32, 32, 32, 32 * soft);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
+}
+const blobTex = radialTex(0.15), softTex = radialTex(0);
+// awning stripes in two set roles, grain on top; repainted on palette change
+const awnings = [];
+function awningTex(a, b) {
+  const c = mkCanvas(128, 64), t = canvasTex(c); t.magFilter = THREE.NearestFilter;
+  const entry = { c, t, a, b }; awnings.push(entry); return t;
+}
+function paintAwning(e) {
+  const x = e.c.getContext('2d'), p = pal();
+  for (let i = 0; i < 8; i++) { x.fillStyle = p[i % 2 ? e.b : e.a]; x.fillRect(i * 16, 0, 16, 64); }
+  x.globalCompositeOperation = 'multiply'; x.drawImage(grainCanvas(3, 128, 64, 400), 0, 0); x.globalCompositeOperation = 'source-over';
+  e.t.needsUpdate = true;
+}
+
+// ---------- materials: toon paint with a 4-step gradient map, never plastic ----------
+const gradientMap = new THREE.DataTexture(new Uint8Array([70, 140, 205, 255]), 4, 1, THREE.RedFormat);
+gradientMap.minFilter = gradientMap.magFilter = THREE.NearestFilter; gradientMap.generateMipmaps = false; gradientMap.needsUpdate = true;
+const mats = {};
+function paint(role, map = grainTex, key = role) {
+  if (mats[key]) return mats[key];
+  const m = DONT
+    ? new THREE.MeshPhysicalMaterial({ roughness: 0.16, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.06, map: map === grainTex || Object.values(TEX).includes(map) ? null : map })
+    : new THREE.MeshToonMaterial({ gradientMap, map });
+  m.userData.role = role; mats[key] = m; return m;
+}
+const M = r => paint('material-' + r);
+const SURF = { plaster: 'plaster', stone: 'plaster', wood: 'wood', roof: 'roof' };   // which map each set role wears
+const MT = r => SURF[r] ? paint('material-' + r, TEX[SURF[r]], 'tex-' + r) : M(r);
+
+// ---------- geometry helpers ----------
+const world = new THREE.Group(); scene.add(world);
+function mesh(geo, mat, x, y, z, parent = world, shadow = true) {
+  const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = shadow; parent.add(m); return m;
+}
+function box(w, h, d, mat, x, y, z, parent) {
+  const tex = Object.entries(TEX).find(([, t]) => t === mat.map);
+  const g = new THREE.BoxGeometry(w, h, d);
+  if (tex) worldUV(g, TILE[tex[0]], x, y + h / 2, z);
+  return mesh(g, mat, x, y + h / 2, z, parent);
+}
+const blobMat = () => new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: 0.45, depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+const blobs = [];
+function blob(x, z, r, parent = world) {
+  const m = mesh(new THREE.CircleGeometry(r, 24).rotateX(-Math.PI / 2), blobMat(), x, 0.012, z, parent, false);
+  blobs.push(m); return m;
+}
+
+// ---------- the diorama: a rooftop garden market on a hill town ----------
+box(15, 0.3, 10, paint('ground', TEX.floor, 'ground-tiles'), 0, -0.3, -0.5);               // the terrace floor
+box(15.2, 8, 10.2, MT('plaster'), 0, -8.3, -0.5);                                           // the building under it
+for (const y of [-2.6, -5.6]) for (let x = -6; x <= 6.01; x += 2.4)                         // windows on the near face
+  box(0.8, 1.1, 0.06, paint('outline'), x, y, 4.62);
+box(15, 0.6, 0.3, MT('plaster'), 0, 0, -5.35);                                              // parapet, back and sides;
+for (const sx of [-7.35, 7.35]) box(0.3, 0.6, 9.7, MT('plaster'), sx, 0, -0.5);             // the near side stays open
+
+const lamps = [];
+function lamp(x, y, z, parent = world) {
+  const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g);
+  box(0.05, 0.25, 0.05, M('wood'), 0, 0.18, 0, g);
+  const cage = box(0.34, 0.06, 0.34, M('wood'), 0, 0.16, 0, g); cage.castShadow = false;
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), new THREE.MeshBasicMaterial({ toneMapped: false }));
+  g.add(core);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  glow.scale.setScalar(2.6); g.add(glow);
+  const l = { g, core, glow, light: null }; lamps.push(l); return l;
+}
+const stalls = {}, signs = [];
+function stall(id, x, z, stripeA, stripeB, goods) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
+  box(2.4, 0.95, 0.9, MT('wood'), 0, 0, 0, g);
+  box(2.56, 0.08, 1.02, MT('wood'), 0, 0.95, 0, g);
+  for (const sx of [-1.15, 1.15]) { box(0.1, 2.5, 0.1, MT('wood'), sx, 0, -0.42, g); box(0.1, 2.05, 0.1, MT('wood'), sx, 0, 0.42, g); }
+  const aw = mesh(new THREE.PlaneGeometry(2.9, 1.6), paint('white', awningTex(stripeA, stripeB), 'awning-' + id), 0, 2.3, 0.1, g);
+  aw.material.side = THREE.DoubleSide; aw.rotation.x = -Math.PI / 2 + 0.45;
+  goods(g);
+  if (!DONT) {                                         // the painted sign board on the counter's front (ComfyUI art)
+    const c = mkCanvas(48, 24), t = canvasTex(c); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+    const m = new THREE.MeshToonMaterial({ gradientMap, map: t, alphaTest: 0.5 });
+    m.userData.role = 'white'; mats['sign-' + id] = m; signs.push({ id, c, t });
+    mesh(new THREE.PlaneGeometry(1.2, 0.6), m, 0, 0.5, 0.46, g, false).receiveShadow = true;
+  }
+  blob(0, 0, 1.6, g).scale.set(1, 1, 0.55);
+  stalls[id] = { g, anchor: new THREE.Vector3(x, 2.95, z) };
+  return g;
+}
+const fruit = (g, role, n, y = 1.12) => { for (let i = 0; i < n; i++)
+  mesh(new THREE.IcosahedronGeometry(0.12, 0), M(role), -0.95 + (i % 9) * 0.24, y + Math.floor(i / 9) * 0.05, 0.25 - Math.floor(i / 9) * 0.26, g); };
+stall('seed', -4.4, -3.3, 'material-cloth2', 'material-plaster', g => {
+  for (let i = 0; i < 4; i++) box(0.42, 0.24, 0.42, MT('wood'), -0.8 + i * 0.53, 0.99, 0.05, g);
+  for (let i = 0; i < 3; i++) mesh(new THREE.IcosahedronGeometry(0.34, 1), M('cloth2'), -1.6 + i * 0.4, 0.26, 0.8 + (i % 2) * 0.2, g).scale.set(1, 0.75, 1);
+});
+stall('fig', 0.3, -3.3, 'material-cloth', 'material-plaster', g => { fruit(g, 'roof', 18); fruit(g, 'cloth2', 6, 1.2); });
+stall('herb', 4.8, -3.3, 'material-leaf', 'material-plaster', g => {
+  for (let i = 0; i < 5; i++) { box(0.3, 0.2, 0.3, M('roof'), -0.9 + i * 0.45, 0.99, 0.1, g);
+    mesh(new THREE.IcosahedronGeometry(0.2, 0), M('leaf'), -0.9 + i * 0.45, 1.36, 0.1, g); }
+});
+const mainLamp = lamp(1.55, 1.85, -2.75);           // the light that turns warm in a "one warm light" scheme
+box(0.06, 0.06, 0.4, M('wood'), 1.45, 2.05, -2.8);
+lamp(-5.7, 1.7, -2.75); lamp(6.1, 1.7, -2.75);
+
+// bunting: flag triangles in set roles on sagging lines between posts, behind the stalls
+function bunting(a, b, sag, n, roles) {
+  const line = new THREE.LineBasicMaterial({ color: 0x000000 }); line.userData.role = 'outline'; mats['line-' + Object.keys(mats).length] = line;
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const t = i / n; pts.push(new THREE.Vector3().lerpVectors(a, b, t).add(new THREE.Vector3(0, -sag * 4 * t * (1 - t), 0))); }
+  world.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), line));
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[i], p1 = pts[i + 1], mid = p0.clone().lerp(p1, 0.5);
+    const g = new THREE.BufferGeometry().setFromPoints([p0.clone().lerp(mid, 0.15), p1.clone().lerp(mid, 0.15), mid.clone().add(new THREE.Vector3(0, -0.34, 0.02))]);
+    g.computeVertexNormals();
+    const f = new THREE.Mesh(g, paint('material-' + roles[i % roles.length], grainTex, 'flag-' + roles[i % roles.length]));
+    f.material.side = THREE.DoubleSide; f.castShadow = true; world.add(f);
+  }
+}
+for (const x of [-7.15, 7.15]) box(0.12, 3.3, 0.12, MT('wood'), x, 0, -5.2);
+box(0.12, 3.0, 0.12, MT('wood'), -2.05, 0, -5.2); box(0.12, 3.0, 0.12, MT('wood'), 2.55, 0, -5.2);
+const FLAGS = ['cloth', 'cloth2', 'roof', 'plaster', 'leaf'];
+bunting(new THREE.Vector3(-7.15, 3.25, -5.2), new THREE.Vector3(-2.05, 2.95, -5.2), 0.35, 11, FLAGS);
+bunting(new THREE.Vector3(-2.05, 2.95, -5.2), new THREE.Vector3(2.55, 2.95, -5.2), 0.3, 10, FLAGS.slice(2).concat(FLAGS.slice(0, 2)));
+bunting(new THREE.Vector3(2.55, 2.95, -5.2), new THREE.Vector3(7.15, 3.25, -5.2), 0.35, 11, FLAGS);
+
+// planters, potted trees, crates, a bench
+function planter(x, z, w, d) {
+  box(w, 0.55, d, MT('wood'), x, 0, z); blob(x, z, Math.max(w, d) * 0.62).scale.set(w > d ? 1 : 0.5, 1, w > d ? 0.5 : 1);
+  const n = Math.round(Math.max(w, d) / 0.55);
+  for (let i = 0; i < n; i++) { const t = (i + 0.5) / n - 0.5;
+    mesh(new THREE.IcosahedronGeometry(0.32 + rnd() * 0.08, 0), M('leaf'), x + (w > d ? t * w : 0), 0.72, z + (w > d ? 0 : t * d)).scale.set(1, 0.75, 1); }
+}
+planter(-6.5, 1.6, 0.6, 3.0); planter(6.5, 1.6, 0.6, 3.0); planter(-1.4, 3.7, 1.8, 0.55);
+function tree(x, z, s = 1) {
+  mesh(new THREE.CylinderGeometry(0.38 * s, 0.3 * s, 0.6 * s, 8), M('roof'), x, 0.3 * s, z);
+  mesh(new THREE.CylinderGeometry(0.07, 0.09, 1.2 * s, 6), M('wood'), x, 0.9 * s, z);
+  mesh(new THREE.IcosahedronGeometry(0.85 * s, 0), M('leaf'), x, 1.85 * s, z).scale.set(1, 0.85, 1);
+  blob(x, z, 0.9 * s);
+}
+tree(-6.2, -4.7); tree(6.3, -4.7, 1.1); tree(6.0, 3.6, 0.8);
+box(0.5, 0.5, 0.5, MT('wood'), -2.1, 0, -2.5); box(0.38, 0.38, 0.38, MT('wood'), -2.05, 0.5, -2.5).rotation.y = 0.5;
+box(0.5, 0.5, 0.5, MT('wood'), 2.9, 0, -2.3).rotation.y = -0.3; blob(-2.1, -2.5, 0.5); blob(2.9, -2.3, 0.5);
+box(1.7, 0.42, 0.5, MT('wood'), -2.6, 0, 1.9); blob(-2.6, 1.9, 1.0).scale.set(1, 1, 0.45);
+
+// a 4-sided roof whose UVs run in world units: tiles across, rows up the slope
+function roofCone(r, h) {
+  const g = new THREE.ConeGeometry(r, h, 4), uv = g.attributes.uv, around = 4 * r * Math.SQRT2, up = Math.hypot(h, r * 0.71);
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * around / TILE.roof, uv.getY(i) * up / TILE.roof);
+  return g;
+}
+// the hill town falling away behind and beside the terrace
+const town = new THREE.Group(); world.add(town);
+for (let row = 0; row < 4; row++) {
+  const z = -9.5 - row * 6.5, base = -4 - row * 3.6;
+  for (let x = -26 + rnd() * 3; x < 26; x += 4.2 + rnd() * 2) {
+    const w = 3 + rnd() * 1.6, d = 3.4 + rnd() * 1.4, h = 3.2 + rnd() * 2.4;
+    const walls = rnd() < 0.7 ? MT('plaster') : MT('stone');
+    const zz = z + rnd() * 1.5;
+    box(w, h, d, walls, x, base, zz, town);
+    const roof = mesh(roofCone(Math.max(w, d) * 0.74, 1.4 + rnd() * 0.6), MT('roof'), x, base + h + 0.75, zz, town);
+    roof.rotation.y = Math.PI / 4; roof.scale.set(w / Math.max(w, d), 1, d / Math.max(w, d));
+  }
+}
+for (const side of [-1, 1]) for (let i = 0; i < 4; i++) {
+  const x = side * (11 + i * 4.5 + rnd() * 1.5), z = -3 + rnd() * 7, base = -9 - i * 1.5, h = 6 + rnd() * 2;
+  box(3.6, h, 3.8, MT('plaster'), x, base, z, town);
+  mesh(roofCone(2.7, 1.6), MT('roof'), x, base + h + 0.8, z, town).rotation.y = Math.PI / 4;
+}
+
+// the animated banded ground surface: wind over the valley floor, lighting quantised to 4 bands, manual fog
+const valleyMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uBase: { value: new THREE.Color() }, uCrest: { value: new THREE.Color() },
+    uKeyDir: { value: new THREE.Vector3(0, 1, 0) }, uKeyCol: { value: new THREE.Color() }, uFill: { value: new THREE.Color() },
+    uFog: { value: new THREE.Color() }, uDensity: { value: 0.01 } },
+  vertexShader: `uniform float uTime; varying vec3 vW; varying float vH;
+    float hgt(vec2 p, float t) { return 0.9 * sin(p.x * 0.11 + t * 0.6) + 0.6 * sin(p.y * 0.17 - t * 0.45 + p.x * 0.04)
+                                      + 0.25 * sin((p.x + p.y) * 0.37 + t * 1.1); }
+    void main() { vec4 w = modelMatrix * vec4(position, 1.0); float h = hgt(w.xz, uTime); w.y += h; vH = h; vW = w.xyz;
+                  gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 uBase, uCrest, uKeyDir, uKeyCol, uFill, uFog; uniform float uDensity; varying vec3 vW; varying float vH;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main() {
+      vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); if (n.y < 0.0) n = -n;
+      float l = max(dot(n, normalize(uKeyDir)), 0.0);
+      l = floor(l * 4.0) / 4.0;                                        // 4 bands, like the toon set
+      vec3 col = uBase * (uFill + uKeyCol * l);
+      col *= 0.9 + 0.1 * hash(floor(vW.xz * vec2(0.8, 3.0)));          // brush noise in streaks
+      col = mix(col, uCrest, smoothstep(1.1, 1.6, vH) * 0.5);          // pale crests where the wind lifts it
+      float d = length(vW - cameraPosition), f = 1.0 - exp(-uDensity * uDensity * d * d);
+      gl_FragColor = vec4(mix(col, uFog, f), 1.0);
+    }`
+});
+const valley = new THREE.Mesh(new THREE.PlaneGeometry(320, 180, 200, 110).rotateX(-Math.PI / 2), valleyMat);
+valley.position.set(0, -20, -80); scene.add(valley);
+
+// painted backdrop on a far open cylinder, drawn in code from the palette
+const skyCanvas = mkCanvas(1024, 512), skyTex = canvasTex(skyCanvas);
+const backdrop = new THREE.Mesh(new THREE.CylinderGeometry(190, 190, 160, 48, 1, true, Math.PI - 1.25, 2.5),
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, toneMapped: false }));
+backdrop.position.set(0, 20, 0); scene.add(backdrop);
+function paintSky() {
+  const p = pal(), x = skyCanvas.getContext('2d'), w = 1024, h = 512, hz = h * 0.58, r = mulberry32(5);
+  const g = x.createLinearGradient(0, 0, 0, hz); g.addColorStop(0, p.sky); g.addColorStop(1, hexMix(p.sky, p.fog, 0.85));
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  const halo = x.createRadialGradient(640, 150, 4, 640, 150, 90);
+  halo.addColorStop(0, hexMix(p.key, '#ffffff', 0.3)); halo.addColorStop(0.18, p.key); halo.addColorStop(1, rgbaOf(p.key, 0));
+  x.globalAlpha = 0.85; x.fillStyle = halo; x.fillRect(540, 50, 200, 200); x.globalAlpha = 1;
+  for (let i = 0; i < 70; i++) {                                   // brushy cloud strokes
+    x.globalAlpha = 0.12 + r() * 0.18; x.fillStyle = hexMix(hexMix(p.sky, p.fog, 0.7), p.key, r() * 0.35);
+    x.beginPath(); x.ellipse(r() * w, 40 + r() * (hz - 120), 30 + r() * 90, 5 + r() * 9, 0, 0, Math.PI * 2); x.fill();
+  }
+  x.globalAlpha = 1;
+  for (const [k, amp, col] of [[0.006, 46, hexMix(p.fog, p.sky, 0.35)], [0.011, 30, hexMix(p.fog, p.outline, 0.12)]]) {
+    x.fillStyle = col; x.beginPath(); x.moveTo(0, h);                // two layers of far hills
+    for (let i = 0; i <= w; i += 8) x.lineTo(i, hz - amp * (0.55 + 0.45 * Math.sin(i * k + amp) * Math.sin(i * k * 2.3)));
+    x.lineTo(w, h); x.fill();
+  }
+  x.fillStyle = p.fog; x.fillRect(0, hz, w, h - hz);
+  skyTex.needsUpdate = true;
+}
+
+// light shafts and drifting mist
+const shafts = [];
+for (let i = 0; i < 4; i++) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2.2 + i * 0.6, 40), new THREE.MeshBasicMaterial({ transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+  m.position.set(-9 + i * 5.5, 4, -14 - i * 2); m.rotation.z = 0.42; scene.add(m); shafts.push(m);
+}
+const mist = [];
+for (let i = 0; i < 18; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, transparent: true, depthWrite: false }));
+  const x = -24 + rnd() * 48, y = -6 + rnd() * 5, z = -8 - rnd() * 30; s.position.set(x, y, z); s.scale.setScalar(9 + rnd() * 7);
+  s.userData = { x, ph: rnd() * 6 }; scene.add(s); mist.push(s);
+}
+
+// ---------- pixel sprites: billboards with nearest filtering, lit by tint ----------
+// The cast are ComfyUI sprites cleaned with PixelForge onto the sprite roles (assets/sprite-palette.gpl):
+// 32 x 48, feet on row 46. Each pixel is a role or its shade (x 0.72), so a palette swap repaints them.
+const CW = 32, CH = 48, FEET = 46;
+const PX = 1.8 / CH;                                  // world units per sprite pixel
+const SHADE = 0.72;
+const SPRITE_ROLES = ['outline', 'sprite-skin', 'sprite-hair', 'sprite-cloth-a', 'sprite-cloth-b', 'sprite-cloth-c', 'material-wood', 'material-cloth2',
+  'material-roof', 'material-leaf', 'material-plaster', 'material-stone'];   // the order of assets/cast-palette.gpl
+const rgbOf = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function roleTable(p) {                               // [r,g,b] for every role and its shade, as the cleanup palette
+  const t = []; for (const r of SPRITE_ROLES) { const c = rgbOf(p[r]); t.push(c); if (r !== 'outline') t.push(c.map(v => Math.round(v * SHADE))); }
+  return t;
+}
+const DAY_KEYS = roleTable(PALETTES.day).map(c => c.join(','));
+const decode = (url, into, id) => new Promise(res => {
+  const img = new Image();
+  img.onload = () => { const c = mkCanvas(img.width, img.height), x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    into[id] = x.getImageData(0, 0, img.width, img.height); res(); };
+  img.src = url;
+});
+const SIGNS = {};
+const spritesReady = Promise.all([...SPRITE_IDS.map(id => decode(window.SPRITE_PNG[id], SPRITES, id)),
+  ...Object.keys(window.SIGN_PNG).map(id => decode(window.SIGN_PNG[id], SIGNS, id))]);
+function paintSprite(ctx, id, sx = 0, sy = 0, w = CW, h = CH, from = SPRITES) {
+  const src = from[id]; if (!src) return;
+  const SW = src.width, SH = src.height;
+  const table = roleTable(pal()), out = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const X = sx + x, Y = sy + y; if (X < 0 || Y < 0 || X >= SW || Y >= SH) continue;
+    const i = (Y * SW + X) * 4, o = (y * w + x) * 4; if (src.data[i + 3] < 128) continue;
+    const k = DAY_KEYS.indexOf(src.data[i] + ',' + src.data[i + 1] + ',' + src.data[i + 2]);
+    const c = k < 0 ? [src.data[i], src.data[i + 1], src.data[i + 2]] : table[k];
+    out.data[o] = c[0]; out.data[o + 1] = c[1]; out.data[o + 2] = c[2]; out.data[o + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+}
+function firstRow(id) {
+  const d = SPRITES[id]?.data; if (!d) return 0;
+  for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) if (d[(y * CW + x) * 4 + 3] > 127) return y;
+  return 0;
+}
+function headBox(id) {                                // a square around the head, for the portrait strip
+  const d = SPRITES[id].data, r0 = firstRow(id); let x0 = CW, x1 = 0;
+  for (let y = r0; y < r0 + 10; y++) for (let x = 0; x < CW; x++) if (d[(y * CW + x) * 4 + 3] > 127) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+  const n = 16; return { x: Math.round((x0 + x1) / 2 - n / 2), y: r0 - 1, n };
+}
+const people = {};
+function person(id, x, z, face = 1) {
+  const c = mkCanvas(CW, CH), t = canvasTex(c);
+  if (DONT) { t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; }
+  else { t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; }
+  const mat = new THREE.MeshBasicMaterial({ map: t, alphaTest: DONT ? 0 : 0.5, transparent: DONT, side: THREE.DoubleSide });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(CW * PX, CH * PX).translate(0, (CH / 2 - (CH - FEET - 1)) * PX, 0), mat);   // the feet row stands on the floor
+  m.position.set(x, 0, z); m.scale.x = face; world.add(m);
+  blob(x, z, 0.42);
+  const hit = new THREE.Mesh(new THREE.SphereGeometry(0.75, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.set(x, 0.9, z); hit.userData.id = id; world.add(hit);
+  people[id] = { id, m, c, t, hit, x, z, anchor: new THREE.Vector3(x, 1.7, z) };
+}
+person('vendor', 0.0, -3.95); person('shopper', 1.2, -1.7, -1); person('elder', -4.6, 0.6); person('kid', 3.4, 1.4, -1);
+function paintPeople() {
+  for (const p of Object.values(people)) {
+    paintSprite(p.c.getContext('2d'), p.id); p.t.needsUpdate = true;
+    p.anchor.y = (FEET + 1 - firstRow(p.id)) * PX;
+  }
+  for (const el of document.querySelectorAll('.face')) {
+    const id = el.dataset.who; if (!SPRITES[id]) continue; const b = headBox(id), cv = el.querySelector('canvas');
+    cv.width = cv.height = b.n; paintSprite(cv.getContext('2d'), id, b.x, b.y, b.n, b.n);
+  }
+}
+
+// selection: an additive accent ring on the ground under the picked person
+const ring = mesh(new THREE.RingGeometry(0.5, 0.64, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ transparent: true,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), 0, 0.02, 0, world, false);
+let selected = 'shopper';
+
+// ---------- lights ----------
+const hemi = new THREE.HemisphereLight(); scene.add(hemi);
+const key = new THREE.DirectionalLight(); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 70 });
+key.shadow.bias = -0.0005; key.shadow.normalBias = 0.03;
+key.target.position.set(0, 0, -1); scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(); rim.target.position.set(0, 0, -1); scene.add(rim, rim.target);
+mainLamp.light = new THREE.PointLight(0xffffff, 0, 9, 1.6); mainLamp.light.position.y = -0.1; mainLamp.g.add(mainLamp.light);
+
+// ---------- post: bloom, tilt-shift, grade ----------
+const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.6, 0.88);   // strength, radius, threshold (linear)
+composer.addPass(bloom);
+const hT = new ShaderPass(HorizontalTiltShiftShader), vT = new ShaderPass(VerticalTiltShiftShader);
+composer.addPass(hT); composer.addPass(vT);
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uVig: { value: 0.5 }, uAmt: { value: 0.3 },
+              uTint: { value: new THREE.Color(1, 1, 1) }, uGrain: { value: 0.012 } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime, uVig, uAmt, uGrain; uniform vec3 uTint; varying vec2 vUv;
+    float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      c.rgb = mix(c.rgb, c.rgb * uTint, (1.0 - smoothstep(0.02, 0.35, lum)) * uAmt);   // shadows lean to the fill; highlights spared
+      vec2 d = vUv - 0.5;
+      c.rgb *= mix(1.0, 1.0 - smoothstep(0.25, 0.85, length(d * vec2(1.1, 1.3))), uVig);
+      c.rgb += (h(floor(vUv * vec2(1280.0, 720.0)) + uTime) - 0.5) * uGrain;
+      gl_FragColor = c;
+    }`
+});
+composer.addPass(grade);
+composer.addPass(new OutputPass());
+
+let tiltOn = !DONT, closeUp = false;
+function applyTilt() {
+  const on = tiltOn && !DONT, amt = closeUp ? 3.2 : 2.4, focus = closeUp ? 0.45 : 0.40;
+  hT.enabled = vT.enabled = on;
+  hT.uniforms.h.value = amt / (W * S); vT.uniforms.v.value = amt / (H * S);
+  hT.uniforms.r.value = vT.uniforms.r.value = focus;
+}
+
+// ---------- palette ----------
+function applyPalette() {
+  const p = pal(), L = p.light, lin = h => new THREE.Color(h);
+  for (const m of Object.values(mats)) if (m.userData.role !== 'white') m.color.set(p[m.userData.role]); else m.color.set(0xffffff);
+  for (const a of awnings) paintAwning(a);
+  scene.background = lin(p.fog);
+  scene.fog = new THREE.FogExp2(p.fog, L.fog);
+  hemi.color.set(p['fill-sky']); hemi.groundColor.set(p['fill-ground']); hemi.intensity = L.hemi;
+  key.color.set(p.key); key.intensity = L.key; key.position.set(...L.keyPos).add(key.target.position);
+  rim.color.set(p.rim); rim.intensity = L.rim; rim.position.set(...L.rimPos);
+  lamps.forEach((l, i) => {
+    const lit = i < L.lampsLit;
+    l.core.material.color.set(p['glow-lamp']).multiplyScalar(lit ? 2.6 : 0.8);
+    l.glow.visible = lit; l.glow.material.color.set(p['glow-lamp']); l.glow.material.opacity = 0.55;
+    if (l.light) l.light.intensity = lit ? L.lamp : 0;
+  });
+  for (const b of blobs) b.material.color.set(p.outline);
+  ring.material.color.set(p.accent);
+  for (const s of shafts) { s.material.color.set(p.key); s.material.opacity = L.shafts; }
+  for (const s of mist) { s.material.color.set(p.fog); s.material.opacity = L.mist; }
+  const u = valleyMat.uniforms;
+  u.uBase.value.set(p['material-leaf']).lerp(lin(p.ground), 0.25); u.uCrest.value.set(hexMix(p['material-leaf'], p.fog, 0.55));
+  u.uKeyDir.value.set(...L.keyPos).normalize(); u.uKeyCol.value.set(p.key).multiplyScalar(L.key / Math.PI);
+  u.uFill.value.set(p['fill-sky']).multiplyScalar(L.hemi / Math.PI); u.uFog.value.set(p.fog); u.uDensity.value = L.fog;
+  const ft = lin(p['fill-ground']), mx = Math.max(ft.r, ft.g, ft.b, 1e-4);
+  grade.uniforms.uTint.value.setRGB(ft.r / mx, ft.g / mx, ft.b / mx); grade.uniforms.uAmt.value = L.grade; grade.uniforms.uVig.value = L.vignette;
+  paintSky(); paintPeople();
+  for (const sg of signs) { paintSprite(sg.c.getContext('2d'), sg.id, 0, 0, 48, 24, SIGNS); sg.t.needsUpdate = true; }
+  const css = document.documentElement.style, rgba = a => rgbaOf(p.plate, a);
+  css.setProperty('--ink', p.ink); css.setProperty('--plate', p.plate); css.setProperty('--accent', p.accent);
+  css.setProperty('--danger', p['signal-danger']); css.setProperty('--paper', p['sprite-cloth-c']); css.setProperty('--info', p['signal-info']);
+  css.setProperty('--plate-90', rgba(0.9)); css.setProperty('--plate-85', rgba(0.85)); css.setProperty('--plate-60', rgba(0.6));
+  requestRender();
+}
+
+// ---------- captions: live HTML text projected from the world ----------
+// Placed in priority order (selected person, then the stall in focus, then the rest). A caption never
+// overlaps another caption, never covers a sprite (its own included) and avoids other stalls when it can.
+// Past MAX_FULL captions the rest collapse to a short name; one that still finds no room is hidden.
+const CAPS = {
+  shopper: ['Tomasina Ferreira-Valcourt', 'Tomasina', 'Wants six pots of rosemary; pays double before the rain'],
+  vendor: ['Mira, the fig seller', 'Mira', 'Her figs spoil if the rain reaches them'],
+  elder: ['Old Anselm', 'Anselm', 'Knows which clouds bring rain; ask him before noon'],
+  kid: ['Pip', 'Pip', 'Will carry a message for two coins'],
+  fig: ['Fig and apricot stall', 'Figs', 'Uncovered · 18 baskets left'],
+  herb: ['Herb and tea stall', 'Herbs', 'Rosemary: 4 pots, two short of the order'],
+  seed: ['Seed and bulb stall', 'Seeds', 'Closed until the delivery'],
+};
+const SETS = { key: ['shopper', 'elder', 'fig'], heavy: ['shopper', 'vendor', 'elder', 'fig', 'herb'], live: ['shopper', 'vendor', 'elder', 'kid', 'fig'] };
+const FOCUS_STALL = 'fig', MAX_FULL = 4;
+const captions = {};
+for (const [id, [name, short, line]] of Object.entries(CAPS)) {
+  const el = document.createElement('div'); el.className = 'cap box hidden';
+  el.innerHTML = `<b><span class="n"></span><span class="s"></span></b><i></i>`;
+  el.querySelector('.n').textContent = name; el.querySelector('.s').textContent = short; el.querySelector('i').textContent = line;
+  $('captions').appendChild(el);
+  captions[id] = { id, el, anchor: (people[id] || stalls[id]).anchor };
+}
+function showCaptions(set) { for (const [id, c] of Object.entries(captions)) c.el.classList.toggle('hidden', !SETS[set].includes(id)); }
+function bounds() {   // the free part of the stage: below the top column, left of the detail panel, above the strip
+  if (!ui.classList.contains('heavy')) return { l: 12, t: 12, r: W - 12, b: H - 12 };
+  const r = id => $(id).getBoundingClientRect(), o = ui.getBoundingClientRect();
+  return { l: 16, t: (r('topcol').bottom - o.top) / S + 10, r: (r('detail').left - o.left) / S - 12, b: (r('strip').top - o.top) / S - 10 };
+}
+const toScreen = p3 => { const v = p3.clone().project(camera); return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H }; };
+function spriteRect(q) {      // the drawn figure on screen: head top to feet, 0.6 of its height wide
+  const top = toScreen(new THREE.Vector3(q.x, (FEET + 1 - firstRow(q.id)) * PX + q.m.position.y, q.z));
+  const foot = toScreen(new THREE.Vector3(q.x, 0, q.z));
+  const h = foot.y - top.y, w = h * 0.6; return { id: q.id, x: top.x - w / 2, y: top.y, w, h };
+}
+function stallRect(id) {
+  const g = stalls[id].g.position; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const dx of [-1.45, 1.45]) for (const dy of [0, 2.7]) for (const dz of [-0.6, 0.9]) {
+    const p = toScreen(new THREE.Vector3(g.x + dx, dy, g.z + dz));
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+  }
+  return { id, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+const hits = (a, b, gap) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+function findSpot(anc, own, w, h, B, placed, hard, soft) {
+  const ok = r => r.x >= B.l && r.y >= B.t && r.x + r.w <= B.r && r.y + r.h <= B.b &&
+    !placed.some(p => hits(r, p, 4)) && !hard.some(p => hits(r, p, 2)) && !soft.some(p => hits(r, p, 2));
+  const cx = own ? own.x + own.w / 2 : anc.x, top = own ? own.y : anc.y;
+  const tries = [];
+  for (const dy of [0, -14, -28, -42, -56, -70, -84]) for (const dx of [0, -50, 50, -100, 100, -150, 150])
+    tries.push([cx - w / 2 + dx, top - h - 4 + dy]);                                        // above, sliding out
+  if (own) for (const dy of [0, 16, -16, 32, 48]) {
+    tries.push([own.x + own.w + 6, own.y + dy]); tries.push([own.x - w - 6, own.y + dy]);   // beside
+  }
+  if (own) for (const dx of [0, -60, 60]) tries.push([cx - w / 2 + dx, own.y + own.h + 4]);   // below
+  for (const [x, y] of tries) { const r = { x, y, w, h }; if (ok(r)) return r; }
+  return null;
+}
+let lastSpriteRects = [];
+function layoutCaptions() {
+  if (ui.classList.contains('close')) return;
+  camera.updateMatrixWorld();
+  const B = bounds();
+  const sprites = Object.values(people).filter(q => q.m.visible).map(spriteRect);
+  const stallRs = Object.keys(stalls).map(stallRect);
+  lastSpriteRects = sprites;
+  const order = Object.keys(CAPS);
+  const rank = id => id === selected ? -2 : id === FOCUS_STALL ? -1 : order.indexOf(id);
+  const live = Object.values(captions).filter(c => !c.el.classList.contains('hidden')).sort((a, b) => rank(a.id) - rank(b.id));
+  const placed = []; let full = 0;
+  for (const c of live) {
+    const own = people[c.id] ? sprites.find(r => r.id === c.id) : stallRs.find(r => r.id === c.id);
+    const anc = toScreen(c.anchor), otherStalls = stallRs.filter(r => r.id !== c.id);
+    let spot = null;
+    for (const short of full < MAX_FULL ? [false, true] : [true]) {
+      c.el.classList.toggle('short', short);
+      const w = c.el.offsetWidth, h = c.el.offsetHeight;
+      spot = c.id === selected               // the selected person's caption stays at their head, over a stall if need be
+        ? findSpot(anc, own, w, h, B, placed, sprites, [])
+        : findSpot(anc, own, w, h, B, placed, sprites, otherStalls) || findSpot(anc, own, w, h, B, placed, sprites, []);
+      if (spot) { if (!short) full++; break; }
+    }
+    c.el.classList.toggle('off', !spot);
+    if (!spot) continue;
+    c.el.style.transform = `translate(${Math.round(spot.x)}px, ${Math.round(spot.y)}px)`;
+    placed.push(spot);
+  }
+}
+// a check for captures: overlapping text boxes, clipped text, boxes outside the frame and captions over
+// sprites; the result goes on <body data-text-audit>
+function auditText() {
+  const o = ui.getBoundingClientRect();
+  const vis = [...ui.querySelectorAll('.box')].filter(e => e.offsetParent !== null && !e.classList.contains('off'));
+  const rs = vis.map(e => e.getBoundingClientRect());
+  let overlaps = 0;
+  for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) {
+    const a = rs[i], b = rs[j]; if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlaps++;
+  }
+  const clipped = [...ui.querySelectorAll('.box, .box *')].filter(e => e.offsetParent !== null &&
+    (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1) && e.clientWidth > 0).length;
+  const outside = rs.filter(r => r.left < o.left - 1 || r.top < o.top - 1 || r.right > o.right + 1 || r.bottom > o.bottom + 1).length;
+  let covers = 0;
+  for (const e of vis) if (e.classList.contains('cap')) {
+    const r = e.getBoundingClientRect(), c = { x: (r.left - o.left) / S, y: (r.top - o.top) / S, w: r.width / S, h: r.height / S };
+    covers += lastSpriteRects.filter(q => hits(c, q, 0)).length;
+  }
+  document.body.dataset.textAudit = `overlaps=${overlaps} clipped=${clipped} outside=${outside} covers=${covers}`;
+}
+function select(id) {
+  selected = id; const p = people[id]; ring.position.set(p.x, 0.02, p.z);
+  for (const [k, c] of Object.entries(captions)) c.el.classList.toggle('sel', k === id);
+  requestRender();
+}
+
+// ---------- camera: a fixed stage, eased close-ups that always come home ----------
+const camPos = HOME.pos.clone(), camLook = HOME.look.clone(), tgtPos = HOME.pos.clone(), tgtLook = HOME.look.clone();
+let closeUntil = 0;
+function closeShot(id) {
+  const p = people[id];
+  return { pos: new THREE.Vector3(p.x + 2.7, 2.3, p.z + 4.05), look: new THREE.Vector3(p.x, 0.85, p.z) };
+}
+function setClose(on, instant = false) {
+  closeUp = on; ui.classList.toggle('close', on);
+  const s = on ? closeShot(selected) : HOME; tgtPos.copy(s.pos); tgtLook.copy(s.look);
+  if (instant) { camPos.copy(tgtPos); camLook.copy(tgtLook); }
+  closeUntil = on ? performance.now() + 8000 : 0;   // a close-up returns home by itself
+  $('bClose').setAttribute('aria-pressed', on); applyTilt(); requestRender();
+}
+
+// ---------- frames ----------
+function setupFrame(f) {
+  if (f === 'key-scene' || f === 'dont') showCaptions('key');
+  if (f === 'text-heavy') { ui.classList.add('heavy'); showCaptions('heavy'); }
+  if (f === 'character') { showCaptions('key'); setClose(true, true); }
+  if (f === 'prop') {
+    showCaptions('key'); for (const c of Object.values(captions)) c.el.classList.add('hidden');
+    for (const id of ['vendor', 'shopper']) { people[id].m.visible = false; }
+    ring.visible = false; closeUp = true; applyTilt();
+    tgtPos.set(2.0, 2.7, 1.2); tgtLook.set(0.3, 1.0, -3.3); camPos.copy(tgtPos); camLook.copy(tgtLook);
+  }
+}
+
+// ---------- animation and render loop ----------
+const tint = new THREE.Color(), warm = new THREE.Color();
+function update(t, dt) {
+  const p = pal();
+  valleyMat.uniforms.uTime.value = t;
+  grade.uniforms.uTime.value = FRAME ? 0 : t % 100;
+  const L = p.light;
+  if (mainLamp.light && L.lampsLit) mainLamp.light.intensity = L.lamp * (1 + 0.06 * Math.sin(t * 7.3) * Math.sin(t * 3.1));
+  for (const s of mist) s.position.x = s.userData.x + Math.sin(t * 0.05 + s.userData.ph) * 2;
+  if (!FRAME) {
+    const k = 1 - Math.exp(-dt * (closeUp ? 0.8 : 1.2));
+    camPos.lerp(tgtPos, k); camLook.lerp(tgtLook, k);
+  }
+  camera.position.copy(camPos); camera.lookAt(camLook);
+  const lampW = new THREE.Vector3(); mainLamp.g.getWorldPosition(lampW);
+  for (const q of Object.values(people)) {
+    q.m.rotation.y = Math.atan2(camera.position.x - q.x, camera.position.z - q.z);        // yaw-only billboard
+    q.m.position.y = (((Math.floor(t * 1.6 + q.x) % 2) + 2) % 2) * PX * (FRAME ? 0 : 1);                // idle bob in whole pixels
+    const d = Math.hypot(lampW.x - q.x, lampW.z - q.z), w = L.lampsLit ? 0.55 * (1 - sstep(0.8, 4.5, d)) : 0;
+    tint.set(p.tint).lerp(warm.set(p['glow-lamp']), w); q.m.material.color.copy(tint);
+  }
+  if (closeUp && !FRAME && closeUntil && performance.now() > closeUntil) setClose(false);
+}
+let S = 1, needRender = true, activeUntil = 0, last = 0, prev = 0, running = false, frameCount = 0;
+function requestRender() { needRender = true; activeUntil = performance.now() + 2000; kick(); }
+function loop(ms) {
+  if (FRAME) {
+    update(FIXED_T, 1 / 60); composer.render(); layoutCaptions();
+    if (++frameCount < 10) requestAnimationFrame(loop); else { auditText(); document.title = 'ready'; }
+    return;
+  }
+  if (document.hidden) { running = false; return; }
+  const moving = camPos.distanceTo(tgtPos) > 0.01;
+  if (moving || needRender || ms < activeUntil || ms - last >= 100) {   // about 10 fps when idle
+    const dt = Math.min((ms - (prev || ms)) / 1000, 0.1); prev = ms;
+    update(ms / 1000, dt); composer.render(); layoutCaptions(); last = ms; needRender = false;
+  }
+  requestAnimationFrame(loop);
+}
+function kick() { if (!FRAME && !running && !document.hidden) { running = true; prev = 0; requestAnimationFrame(loop); } }
+document.addEventListener('visibilitychange', kick);
+
+function resize() {
+  S = FRAME ? 1 : Math.min(innerWidth / W, innerHeight / H);
+  const w = Math.round(W * S), h = Math.round(H * S), pr = FRAME ? 1 : Math.min(devicePixelRatio || 1, 2);
+  renderer.setPixelRatio(pr); renderer.setSize(w, h, false);
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  composer.setPixelRatio(pr); composer.setSize(w, h);
+  ui.style.transform = FRAME ? 'none' : `scale(${S})`;
+  applyTilt(); requestRender();
+}
+
+// ---------- interaction (outside frame mode) ----------
+if (!FRAME) {
+  const ray = new THREE.Raycaster(), hits = Object.values(people).map(p => p.hit);
+  canvas.addEventListener('click', e => {
+    const r = canvas.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    const h = ray.intersectObjects(hits)[0];       // generous invisible hit volumes, not the text, take the click
+    if (h) select(h.object.userData.id); else if (closeUp) setClose(false);
+  });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && closeUp) setClose(false); });
+  const sel = $('pal');
+  for (const [k, p] of Object.entries(PALETTES)) sel.add(new Option(p.label, k, false, k === palName));
+  sel.onchange = () => { palName = sel.value; applyPalette(); };
+  $('bTilt').onclick = e => { tiltOn = !tiltOn; e.currentTarget.setAttribute('aria-pressed', tiltOn); applyTilt(); requestRender(); };
+  $('bClose').onclick = () => setClose(!closeUp);
+  $('bHeavy').onclick = e => { const on = ui.classList.toggle('heavy'); e.currentTarget.setAttribute('aria-pressed', on);
+    showCaptions(on ? 'heavy' : 'live'); requestRender(); };
+  addEventListener('resize', resize);
+  showCaptions('live');
+}
+
+// ---------- start ----------
+const texReady = new Promise(res => { loading.onLoad = res; loading.onError = res; });
+Promise.all([spritesReady, texReady]).then(() => {    // frames are drawn only once every image is in
+  applyPalette();
+  select('shopper');
+  if (FRAME) setupFrame(FRAME);
+  resize();
+  if (FRAME) requestAnimationFrame(loop); else kick();
+});
+</script>
+</body>
+</html>

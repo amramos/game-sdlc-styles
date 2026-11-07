@@ -1,0 +1,46 @@
+# PixelForge config for this entry's generated sprites. Paths are relative to this folder.
+[palette]
+source = "../example-palette.gpl"
+metric = "redmean"
+
+# Signals and the accent belong to the interface only: snapping never reaches them in sprites.
+[[palette.reserved]]
+name = "interface"
+colors = ["#FF38B0", "#6BD94A", "#FF4B3E", "#B67CFF"]
+allow_in = ["ui/**"]
+
+# The two backdrop colours have no outline and the lowest chroma: never on a cast sprite.
+[[palette.reserved]]
+name = "backdrop"
+colors = ["#BFE0E6", "#E6C4A4"]
+allow_in = ["backdrop/**"]
+
+# A standing person: about 22 px of figure inside a 1 px ink outline.
+[[canvas]]
+name = "cast"
+size = [16, 24]
+paths = ["sprites/cast_*.png"]
+max_colors = 12
+hard_alpha = true
+anchor = "bottom"
+
+# The pack beast, side view.
+[[canvas]]
+name = "beast"
+size = [36, 28]
+paths = ["sprites/beast_*.png"]
+max_colors = 12
+hard_alpha = true
+anchor = "bottom"
+
+# A dialogue portrait: head and shoulders, shown at the same pixel size inside a 26 px frame.
+[[canvas]]
+name = "bust"
+size = [24, 24]
+paths = ["sprites/bust_*.png"]
+max_colors = 12
+hard_alpha = true
+anchor = "bottom"
+
+[naming]
+pattern = '^(cast|beast|bust)_[a-z0-9]+(_[a-z0-9]+)?\.png$'

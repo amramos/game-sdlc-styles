@@ -1,0 +1,20 @@
+GIMP Palette
+Name: ink-graphic-novel - example (stark night)
+Columns: 4
+# One instance of the colour structure in style.md (demo.html's 'night' palette). Never ship it as
+# is: every game re-chooses each role for its own tone. demo.html's 'pulp' (bright daytime) and
+# 'noir' (grey) palettes fill the same roles and pass the same rules.
+# Checked (value = HSV V, chroma = S x V, contrast = WCAG ratio, huedist = hue difference):
+#   8 colours; ink value 0.06; ink on paper 15.6:1
+#   field values 0.24 < 0.45 < 0.76, step contrast 1.97, 3.03; field-1 on ink 1.36:1; field-3 on ink 8.1:1
+#   field chroma max 0.20; paper chroma 0.12
+#   accent chroma 0.73 (field max 0.20); accent at least 175 deg from every field hue; accent on ink 8.5:1
+#   ink on signals 6.3:1, 11.3:1; accent 41 and 107 deg from the signals
+  8  10  16	ink           #080A10
+236 228 206	paper         #ECE4CE
+ 28  42  60	field-1       #1C2A3C
+ 62  88 114	field-2       #3E5872
+142 169 194	field-3       #8EA9C2
+244 146  58	accent        #F4923A
+240  96 126	signal-alert  #F0607E
+143 211 160	signal-ok     #8FD3A0

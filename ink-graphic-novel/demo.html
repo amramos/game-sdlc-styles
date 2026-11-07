@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ink graphic novel - demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #080A10; overflow: hidden; }
+  #view { position: absolute; left: 0; top: 0; }
+  body.frame #view { position: fixed; left: 0; top: 0; width: 1280px; height: 720px; }
+  #ui { position: fixed; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px;
+        align-items: center; font: 14px sans-serif; color: #ECE4CE; }
+  #ui button { font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+  #ui .sw { width: 14px; height: 14px; display: inline-block; outline: 1px solid #0008; }
+  body.frame #ui { display: none; }
+</style>
+<!-- Generated art (ComfyUI), each as a data URI so the page can recolour it from file:// (see assets/README.md). -->
+<script src="assets/bg-exterior.png.js"></script>
+<script src="assets/bg-radio-room.png.js"></script>
+<script src="assets/bg-slope.png.js"></script>
+<script src="assets/rescuer-pull.png.js"></script>
+<script src="assets/rescuer-flare.png.js"></script>
+<script src="assets/dog.png.js"></script>
+<script src="assets/dog-close.png.js"></script>
+<script src="assets/sled.png.js"></script>
+<script src="assets/operator.png.js"></script>
+<script src="assets/radio-set.png.js"></script>
+<script src="assets/thermos.png.js"></script>
+<script src="assets/rope.png.js"></script>
+<script src="assets/ice-axe.png.js"></script>
+<script src="assets/paper-grain.png.js"></script>
+</head>
+<body>
+<canvas id="view" width="1280" height="720"></canvas>
+<div id="ui"></div>
+<script>
+'use strict';
+// ---------------------------------------------------------------- palette roles
+// Every palette fills the same eight roles and passes the colour rules in style.md. `rim` is a
+// lighting choice of that palette, not of the look. The art is drawn in 'night'; the other palettes
+// recolour it at load (see recolour()).
+const ROLES = ['ink', 'paper', 'field-1', 'field-2', 'field-3', 'accent', 'signal-alert', 'signal-ok'];
+const PALETTES = {
+  night: { name: 'stark night', rim: true, 'ink': '#080A10', 'paper': '#ECE4CE', 'field-1': '#1C2A3C', 'field-2': '#3E5872', 'field-3': '#8EA9C2', 'accent': '#F4923A', 'signal-alert': '#F0607E', 'signal-ok': '#8FD3A0' },
+  pulp: { name: 'pulp daytime', rim: false, 'ink': '#14100E', 'paper': '#FFF3D6', 'field-1': '#2E5D8A', 'field-2': '#58A6CC', 'field-3': '#D8EEF2', 'accent': '#FF4433', 'signal-alert': '#FFC21A', 'signal-ok': '#7FD86A' },
+  noir: { name: 'grey noir', rim: true, 'ink': '#0A0A0A', 'paper': '#EEEDE6', 'field-1': '#2B2B2B', 'field-2': '#5F5F5F', 'field-3': '#ABABAB', 'accent': '#FF3D4F', 'signal-alert': '#F0C030', 'signal-ok': '#7CC8E8' },
+};
+let palName = 'night', P = PALETTES[palName];
+let MODE = 'ink';                 // 'ink' (the look), 'sil' (silhouette test), 'dont' (rules broken)
+const C = role => P[role];
+const W = 1280, H = 720;
+const cv = document.getElementById('view'), ctx = cv.getContext('2d');
+const OVERFLOW = [];              // filled by the text layout if anything would not fit
+
+// ---------------------------------------------------------------- small helpers
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rectPts = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+function smooth(ctrl, seg = 5, closed = true) {          // Catmull-Rom through the control points
+  const n = ctrl.length, out = [], lim = closed ? n : n - 1;
+  const at = i => closed ? ctrl[(i + n) % n] : ctrl[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < lim; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    for (let k = 0; k < seg; k++) {
+      const t = k / seg, t2 = t * t, t3 = t2 * t;
+      const f = j => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3);
+      out.push([f(0), f(1)]);
+    }
+  }
+  if (!closed) out.push(ctrl[n - 1]);
+  return out;
+}
+function bbox(pts) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return { x0, y0, x1, y1 }; }
+function path(pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); }
+function clipTo(pts, fn) { ctx.save(); path(pts); ctx.clip(); fn(); ctx.restore(); }
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+function fillRole(pts, role) { path(pts); ctx.fillStyle = C(MODE === 'sil' ? 'ink' : role); ctx.fill(); }
+
+// ---------------------------------------------------------------- generated art
+// Every picture is ComfyUI art cleaned onto the night roles. Another palette maps each pixel by its
+// luminance between the night roles (ink, field-1..3, paper) onto the same roles of that palette;
+// warm, saturated pixels are the accent and map to its accent. One set of art serves every palette.
+const IMG = {}, TINT = {};
+function loadArt() {
+  const names = Object.keys(window.ART || {});
+  return Promise.all(names.map(n => new Promise(res => {
+    const im = new Image(); im.onload = () => { IMG[n] = im; res(); }; im.onerror = () => res(); im.src = ART[n];
+  })));
+}
+const lum = ([r, g, b]) => (0.3 * r + 0.55 * g + 0.15 * b) / 255;
+function recolour(name) {
+  const key = palName + '|' + name;
+  if (TINT[key]) return TINT[key];
+  const im = IMG[name]; if (!im) return null;
+  const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+  const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+  if (palName !== 'night') {
+    const src = PALETTES.night, ramp = ['ink', 'field-1', 'field-2', 'field-3', 'paper'];
+    const knots = ramp.map(r => lum(hexRgb(src[r]))), to = ramp.map(r => hexRgb(P[r])), acc = hexRgb(P.accent);
+    const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      if (!px[i + 3]) continue;
+      const r = px[i], gg = px[i + 1], b = px[i + 2], L = (0.3 * r + 0.55 * gg + 0.15 * b) / 255;
+      let k = 0; while (k < knots.length - 2 && L > knots[k + 1]) k++;
+      const f = Math.max(0, Math.min(1, (L - knots[k]) / (knots[k + 1] - knots[k])));
+      let o = [0, 1, 2].map(j => to[k][j] + (to[k + 1][j] - to[k][j]) * f);
+      const warm = Math.max(0, Math.min(1, (r - b - 60) / 120)) * (r > 120 ? 1 : 0);   // the accent and its edge
+      if (warm > 0) o = o.map((v, j) => v + (acc[j] - v) * warm);
+      px[i] = o[0]; px[i + 1] = o[1]; px[i + 2] = o[2];
+    }
+    g.putImageData(d, 0, 0);
+  }
+  return TINT[key] = c;
+}
+function silhouette(name) {
+  const key = 'sil|' + palName + '|' + name;
+  if (TINT[key]) return TINT[key];
+  const im = IMG[name]; if (!im) return null;
+  const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+  const g = c.getContext('2d'); g.drawImage(im, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = C('ink'); g.fillRect(0, 0, c.width, c.height);
+  return TINT[key] = c;
+}
+// Draws art `name` with its bottom centre at (cx, by), `h` tall (or `w` wide); flip mirrors it.
+function figure(name, cx, by, o = {}) {
+  const src = MODE === 'sil' ? silhouette(name) : recolour(name); if (!src) return null;
+  const s = o.h ? o.h / src.height : o.w / src.width, w = src.width * s, h = src.height * s;
+  ctx.save(); ctx.translate(cx, by);
+  if (o.flip) ctx.scale(-1, 1);
+  if (MODE === 'dont') { ctx.shadowColor = 'rgba(40,40,60,0.55)'; ctx.shadowBlur = 18; ctx.shadowOffsetX = 8; ctx.shadowOffsetY = 8; ctx.filter = 'blur(0.8px) saturate(1.4)'; }
+  ctx.drawImage(src, -w / 2, -h, w, h); ctx.restore();
+  return { x: cx - w / 2, y: by - h, w, h };
+}
+// A backdrop filling a rect, cropped like CSS object-fit: cover; fx/fy pick the focus (0..1).
+function backdrop(name, x, y, w, h, fx = 0.5, fy = 0.5, zoom = 1) {
+  const src = recolour(name); if (!src) return;
+  const s = Math.max(w / src.width, h / src.height) * zoom, sw = w / s, sh = h / s;
+  const sx = (src.width - sw) * fx, sy = (src.height - sh) * fy;
+  ctx.save();
+  if (MODE === 'dont') ctx.filter = 'blur(1.6px) saturate(1.7) brightness(1.15)';
+  if (MODE === 'sil') { ctx.fillStyle = C('paper'); ctx.fillRect(x, y, w, h); }
+  else ctx.drawImage(src, sx, sy, sw, sh, x, y, w, h);
+  ctx.restore();
+  if (MODE === 'dont') { const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, 'rgba(120,60,160,0.35)'); g.addColorStop(1, 'rgba(255,150,80,0.35)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
+}
+// A cast shadow: a flat ink shape on the ground, skewed down and away from the light.
+function castShadow(cx, by, w, skew = 46, depth = 14) {
+  if (MODE === 'dont') { ctx.save(); ctx.fillStyle = 'rgba(30,30,40,0.25)'; ctx.filter = 'blur(10px)'; ctx.beginPath(); ctx.ellipse(cx + 10, by + 4, w / 2, 9, 0, 0, 7); ctx.fill(); ctx.restore(); return; }
+  fillRole([[cx - w / 2, by - 3], [cx + w / 2, by - 3], [cx + w / 2 + skew, by + depth], [cx - w / 2 + skew * 0.6, by + depth + 2]], 'ink');
+}
+
+// ---------------------------------------------------------------- paper
+// The page, captions, slips and notes are one paper: the paper role with a faint multiplied grain
+// (a tileable greyscale texture; white leaves the colour as it is).
+let GRAIN = null;
+function grain(x, y, w, h, pts) {
+  if (MODE !== 'ink' || !IMG['paper-grain']) return;
+  if (!GRAIN) GRAIN = ctx.createPattern(IMG['paper-grain'], 'repeat');
+  ctx.save(); if (pts) { path(pts); ctx.clip(); }
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = GRAIN; ctx.fillRect(x, y, w, h); ctx.restore();
+}
+function paperRect(x, y, w, h) { ctx.fillStyle = C('paper'); ctx.fillRect(x, y, w, h); grain(x, y, w, h); }
+
+// ---------------------------------------------------------------- ink strokes (UI marks, rope)
+function strokeVar(pts, ws, closed, col) {
+  ctx.fillStyle = col;
+  const n = pts.length, segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i], b = pts[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L, wa = ws[i] / 2, wb = ws[(i + 1) % n] / 2;
+    ctx.beginPath(); ctx.moveTo(a[0] + nx * wa, a[1] + ny * wa); ctx.lineTo(b[0] + nx * wb, b[1] + ny * wb);
+    ctx.lineTo(b[0] - nx * wb, b[1] - ny * wb); ctx.lineTo(a[0] - nx * wa, a[1] - ny * wa); ctx.closePath(); ctx.fill();
+  }
+  for (let i = 0; i < n; i++) if (ws[i] > 0.6) { ctx.beginPath(); ctx.arc(pts[i][0], pts[i][1], ws[i] / 2, 0, Math.PI * 2); ctx.fill(); }
+}
+// An open brush stroke, tapered at both ends.
+function brush(pts, w, role = 'ink') {
+  if (MODE === 'dont') { ctx.beginPath(); ctx.moveTo(...pts[0]); pts.slice(1).forEach(p => ctx.lineTo(...p)); ctx.lineWidth = 1.5; ctx.strokeStyle = '#777c86'; ctx.stroke(); return; }
+  const fine = smooth(pts, 6, false), n = fine.length;
+  strokeVar(fine, fine.map((_, i) => w * Math.pow(Math.sin(Math.PI * (0.1 + 0.8 * i / (n - 1))), 0.5)), false, C(MODE === 'sil' ? 'ink' : role));
+}
+function hatch(pts, spacing = 8, angle = -0.85, w = 2) {
+  if (MODE !== 'ink') return;
+  clipTo(pts, () => {
+    const b = bbox(pts), cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, R = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2 + 4;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    ctx.beginPath();
+    for (let d = -R; d <= R; d += spacing) { ctx.moveTo(cx - ca * R - sa * d, cy - sa * R + ca * d); ctx.lineTo(cx + ca * R - sa * d, cy + sa * R + ca * d); }
+    ctx.lineWidth = w; ctx.strokeStyle = C('ink'); ctx.stroke();
+  });
+}
+function flakes(x0, y0, w, h, n, seed, t) {
+  const r = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const x = x0 + (r() * w + t * (6 + r() * 6)) % w, y = y0 + (r() * h + t * (14 + r() * 10)) % h, s = 1.5 + r() * 2.5;
+    if (MODE === 'dont') { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(x, y, s * 2.2, 0, 7); ctx.fill(); continue; }
+    if (MODE === 'sil') continue;
+    ctx.fillStyle = C('paper'); ctx.beginPath(); ctx.arc(x, y, s, 0, 7); ctx.fill();
+  }
+}
+function glow(x, y, r, col) {              // used only by the 'dont' frame
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, col); g.addColorStop(1, 'rgba(255,160,60,0)');
+  ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+}
+
+// ---------------------------------------------------------------- lettering
+const LET = '"Comic Neue","Comic Sans MS","Chalkboard SE","Segoe Print",cursive';
+const TIT = '"IM Fell English SC",Georgia,"Times New Roman",serif';
+const font = (px, kind = 'let') => MODE === 'dont' ? `${Math.round(px * 0.62)}px Arial,sans-serif`
+  : kind === 'tit' ? `small-caps 700 ${px}px ${TIT}` : `700 ${px}px ${LET}`;
+function wrap(text, f, maxW) {
+  ctx.font = f;
+  const out = [];
+  for (const para of text.split('\n')) {
+    let cur = '';
+    for (let word of para.split(/\s+/).filter(Boolean)) {
+      while (ctx.measureText(word).width > maxW && word.length > 1) {      // a word wider than the box
+        let k = word.length - 1; while (k > 1 && ctx.measureText(word.slice(0, k)).width > maxW) k--;
+        if (cur) { out.push(cur); cur = ''; } out.push(word.slice(0, k)); word = word.slice(k);
+      }
+      const tryS = cur ? cur + ' ' + word : word;
+      if (!cur || ctx.measureText(tryS).width <= maxW) cur = tryS; else { out.push(cur); cur = word; }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+// The narration frame: a lettered paper box with an ink border and a hard offset shadow.
+// dark = ink box with paper letters (a log). Returns the height.
+function caption(x, y, w, text, o = {}) {
+  const fs = o.fs || 20, pad = o.pad ?? 10, lh = Math.round(fs * 1.22);
+  const f = font(fs, o.title ? 'tit' : 'let');
+  const lines = wrap(o.title || o.lower ? text : text.toUpperCase(), f, w - pad * 2);
+  const h = Math.max(o.h || 0, lines.length * lh + pad * 2);
+  if (o.measure) return h;
+  const dark = o.dark, fg = dark ? C('paper') : C('ink');
+  if (MODE === 'dont') {
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 16;
+    ctx.fillStyle = dark ? '#ff9a3c' : 'rgba(30,34,44,0.55)'; roundRect(x, y, w, h, 12); ctx.fill(); ctx.restore();
+    ctx.fillStyle = '#ffffff';
+  } else {
+    ctx.fillStyle = C('ink'); ctx.fillRect(x + 5, y + 5, w, h);
+    if (dark) { ctx.fillStyle = C('ink'); ctx.fillRect(x, y, w, h); } else paperRect(x, y, w, h);
+    ctx.lineWidth = 3; ctx.strokeStyle = dark ? C('paper') : C('ink');
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    ctx.fillStyle = fg;
+  }
+  ctx.font = f; ctx.textBaseline = 'top';
+  lines.forEach((l, i) => ctx.fillText(l, x + pad, y + pad + i * lh + (lh - fs) / 2));
+  return h;
+}
+// The bare label: title lettering straight on the page, no box.
+function label(x, y, text, fs = 30) {
+  ctx.font = font(fs, 'tit'); ctx.textBaseline = 'top'; ctx.fillStyle = MODE === 'dont' ? '#ffffff' : C('ink'); ctx.fillText(text, x, y);
+  return ctx.measureText(text).width;
+}
+function balloon(x, y, w, text, tail, fs = 18) {
+  const lh = Math.round(fs * 1.22), f = font(fs), lines = wrap(text.toUpperCase(), f, w - 24), h = lines.length * lh + 18;
+  if (MODE === 'dont') { ctx.fillStyle = 'rgba(255,255,255,0.8)'; roundRect(x, y, w, h, 14); ctx.fill(); ctx.fillStyle = '#333'; }
+  else {
+    ctx.beginPath(); ctx.moveTo(x + w * 0.62, y + h - 2); ctx.lineTo(tail[0], tail[1]); ctx.lineTo(x + w * 0.78, y + h - 2); ctx.closePath();
+    ctx.fillStyle = C('paper'); ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = C('ink'); ctx.stroke();
+    roundRect(x, y, w, h, h / 2.4); ctx.fillStyle = C('paper'); ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = C('paper'); ctx.fillRect(x + w * 0.62 + 3, y + h - 6, w * 0.16 - 6, 6);   // join the tail
+    ctx.fillStyle = C('ink');
+  }
+  ctx.font = f; ctx.textBaseline = 'top';
+  lines.forEach((l, i) => { const lw = ctx.measureText(l).width; ctx.fillText(l, x + (w - lw) / 2, y + 9 + i * lh + (lh - fs) / 2); });
+  return h;
+}
+// A sound word: big serif letters, an ink stroke under a paper fill and a hard ink offset.
+function sfx(text, xRight, y, fs, rot) {
+  ctx.save(); ctx.font = font(fs, 'tit'); ctx.textBaseline = 'top';
+  const w = ctx.measureText(text).width; ctx.translate(xRight - w, y); ctx.rotate(rot);
+  if (MODE === 'dont') { ctx.fillStyle = '#ffcc66'; ctx.shadowColor = '#ff7a00'; ctx.shadowBlur = 20; ctx.fillText(text, 0, 0); ctx.restore(); return; }
+  ctx.lineJoin = 'round'; ctx.fillStyle = C('ink'); ctx.fillText(text, 6, 6);
+  ctx.lineWidth = 8; ctx.strokeStyle = C('ink'); ctx.strokeText(text, 0, 0);
+  ctx.fillStyle = C('paper'); ctx.fillText(text, 0, 0); ctx.restore();
+}
+// A handwritten note on ruled paper, pinned at an angle. Returns the height (before rotation).
+function note(x, y, w, text, rot, fs = 20, measure = false) {
+  const lh = Math.round(fs * 1.3), f = MODE === 'dont' ? font(fs) : `400 ${fs}px ${LET}`, lines = wrap(text, f, w - 28), h = lines.length * lh + 38;   // 24 px top margin holds the pin
+  if (measure) return h + Math.abs(Math.sin(rot)) * w + 6;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  if (MODE !== 'dont') { ctx.fillStyle = C('ink'); ctx.fillRect(4, 4, w, h); }
+  paperRect(0, 0, w, h);
+  ctx.fillStyle = C('field-3'); for (let i = 0; i < lines.length; i++) ctx.fillRect(10, 24 + (i + 1) * lh - 3, w - 20, 2);
+  ctx.fillStyle = C('ink'); ctx.font = f; ctx.textBaseline = 'top';
+  lines.forEach((l, i) => ctx.fillText(l, 14, 24 + i * lh + (lh - fs) / 2 - 2));
+  ctx.beginPath(); ctx.arc(w - 22, 10, 6, 0, 7); ctx.fill();   // in the top margin, clear of every line
+  ctx.restore();
+  return h;
+}
+// A torn scrap of paper: straight-ish long edges, ragged short edges.
+function tornRect(w, h, seed) {
+  const r = rng(seed), pts = [];
+  for (let x = 0; x < w; x += 18) pts.push([x, (r() - 0.5) * 2]);
+  for (let y = 0; y < h; y += 3) pts.push([w - 2 + (r() - 0.5) * 3 + Math.sin(y * 0.45) * 1.2, y]);   // the torn end: fine fibres
+  for (let x = w; x > 0; x -= 18) pts.push([x, h + (r() - 0.5) * 2]);
+  for (let y = h; y > 0; y -= 3) pts.push([2 + (r() - 0.5) * 3 + Math.sin(y * 0.5) * 1.2, y]);
+  return pts;
+}
+// An answer slip: a scrap of paper with its key in an ink disc and the answer in capitals.
+// focus lifts it (moves up, longer shadow); off drains it (no shadow, field border, reason below).
+// Returns the height of the slip before rotation.
+function slip(x, y, w, text, o = {}) {
+  const fs = o.fs || 20, lh = Math.round(fs * 1.2), padL = 46, f = font(fs), small = Math.max(16, fs - 4);
+  const lines = wrap(text.toUpperCase(), f, w - padL - 14), reason = o.reason ? wrap(o.reason, `400 ${small}px ${LET}`, w - padL - 14) : [];
+  const h = Math.max(o.h || 0, lines.length * lh + reason.length * Math.round(small * 1.2) + 26);
+  if (o.measure) return h;
+  if (MODE === 'dont') {
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 16;
+    ctx.fillStyle = o.focus ? '#ff9a3c' : 'rgba(30,34,44,0.55)'; roundRect(x, y, w, h, 12); ctx.fill(); ctx.restore();
+    ctx.fillStyle = '#fff'; ctx.font = font(fs); ctx.textBaseline = 'top';
+    lines.forEach((l, i) => ctx.fillText(`[${o.key}] ` + l, x + 12, y + 12 + i * lh));
+    return h;
+  }
+  const lift = o.focus ? 7 : 0, sh = o.off ? 0 : o.focus ? 10 : 4, pts = tornRect(w, h, o.seed || 1);
+  ctx.save(); ctx.translate(x + w / 2, y + h / 2 - lift); ctx.rotate(o.rot || 0); ctx.translate(-w / 2, -h / 2);
+  if (sh) { ctx.save(); ctx.translate(sh, sh); path(pts); ctx.fillStyle = C('ink'); ctx.fill(); ctx.restore(); }
+  path(pts); ctx.fillStyle = C('paper'); ctx.fill(); grain(-10, -10, w + 20, h + 20, pts);
+  path(pts); ctx.lineWidth = o.focus ? 3 : 2; ctx.strokeStyle = o.off ? C('field-3') : C('ink'); ctx.stroke();
+  // the key, in an ink disc at the left
+  ctx.beginPath(); ctx.arc(24, 13 + lh / 2, 14, 0, 7); ctx.fillStyle = o.off ? C('field-3') : C('ink'); ctx.fill();
+  ctx.fillStyle = C('paper'); ctx.font = font(18); ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(o.key, 24, 14 + lh / 2); ctx.textAlign = 'left';
+  ctx.textBaseline = 'top'; ctx.font = f; ctx.fillStyle = o.off ? C('field-2') : C('ink');
+  lines.forEach((l, i) => ctx.fillText(l, padL, 13 + i * lh + (lh - fs) / 2));
+  ctx.font = `400 ${small}px ${LET}`; ctx.fillStyle = C('ink');
+  reason.forEach((l, i) => ctx.fillText(l, padL, 13 + lines.length * lh + 2 + i * Math.round(small * 1.2)));
+  if (o.focus) brush([[padL, h - 9], [padL + (w - padL) * 0.45, h - 11], [w - 20, h - 9]], 3.5);   // the lifted slip is underlined
+  ctx.restore();
+  return h;
+}
+
+// ---------------------------------------------------------------- status marks (drawn in code: icons are never generated)
+function windIcon(x, y, s = 1) {           // three streamlines, the top and bottom ones curl back
+  const Q = pts => pts.map(([a, b]) => [x + a * s, y + b * s]);
+  brush(Q([[0, 8], [20, 8], [30, 6], [33, 0], [29, -4], [24, -2]]), 4.5 * s);
+  brush(Q([[4, 17], [36, 17]]), 4.5 * s);
+  brush(Q([[0, 26], [24, 26], [33, 28], [35, 34], [30, 37], [26, 34]]), 4.5 * s);
+}
+function batteryIcon(x, y, frac, s = 1, cells = 5) {   // the classic outline, charge cells inside
+  const w = 52 * s, h = 26 * s, n = Math.round(frac * cells), cw = (w - 8 * s - (cells - 1) * 3 * s) / cells;
+  ctx.fillStyle = C('ink'); ctx.fillRect(x + w, y + h * 0.3, 5 * s, h * 0.4);
+  ctx.lineWidth = 3 * s; ctx.strokeStyle = C('ink'); ctx.strokeRect(x + 1.5 * s, y + 1.5 * s, w - 3 * s, h - 3 * s);
+  for (let i = 0; i < n; i++) {
+    const cx = x + 4 * s + i * (cw + 3 * s);
+    ctx.fillStyle = C(frac <= 0.2 ? 'signal-alert' : 'signal-ok'); ctx.fillRect(cx, y + 4 * s, cw, h - 8 * s);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = C('ink'); ctx.strokeRect(cx + 0.75, y + 4 * s + 0.75, cw - 1.5, h - 8 * s - 1.5);
+  }
+}
+function eyeIcon(x, y, s = 1) {            // visibility: an eye with the fog over its lower half
+  const Q = pts => pts.map(([a, b]) => [x + a * s, y + b * s]);
+  ctx.lineWidth = 3.5 * s; ctx.strokeStyle = C('ink'); ctx.beginPath();
+  ctx.moveTo(x, y + 14 * s); ctx.quadraticCurveTo(x + 20 * s, y - 4 * s, x + 40 * s, y + 14 * s); ctx.quadraticCurveTo(x + 20 * s, y + 32 * s, x, y + 14 * s); ctx.stroke();
+  ctx.fillStyle = C('ink'); ctx.beginPath(); ctx.arc(x + 20 * s, y + 14 * s, 6 * s, 0, 7); ctx.fill();
+  brush(Q([[2, 30], [38, 30]]), 3.5 * s); brush(Q([[8, 36], [32, 36]]), 3.5 * s);
+}
+function silentIcon(x, y, s = 1) {         // contact lost: a mast whose waves are struck through
+  const Q = pts => pts.map(([a, b]) => [x + a * s, y + b * s]);
+  brush(Q([[20, 38], [20, 22], [20, 10]]), 5 * s);
+  ctx.lineWidth = 3 * s; ctx.strokeStyle = C('ink');
+  for (const r of [9, 16]) { ctx.beginPath(); ctx.arc(x + 20 * s, y + 10 * s, r * s, -Math.PI * 0.85, -Math.PI * 0.15); ctx.stroke(); }
+  brush(Q([[2, 2], [38, 36]]), 4.5 * s);
+}
+// An icon with its value lettered beside it (big number, small unit). Returns the width used.
+function stat(x, y, icon, value, unit) {
+  if (MODE === 'dont') return 0;
+  const iw = icon(x, y) || 44;
+  ctx.fillStyle = C('ink'); ctx.textBaseline = 'alphabetic';
+  ctx.font = font(28); ctx.fillText(value, x + iw + 8, y + 31); const vw = ctx.measureText(value).width;
+  ctx.font = font(16); ctx.fillText(unit, x + iw + 12 + vw, y + 31); const uw = ctx.measureText(unit).width;
+  ctx.textBaseline = 'top';
+  return iw + 12 + vw + (unit ? uw + 4 : 0);
+}
+const WIND = (x, y) => (windIcon(x, y + 2), 38), BATT = frac => (x, y) => (batteryIcon(x, y + 6, frac), 60);
+const EYE = (x, y) => (eyeIcon(x, y + 2, 0.9), 38), SILENT = (x, y) => (silentIcon(x, y, 0.9), 36);
+// Old-style chips: kept only for the 'dont' frame, where they show the web look this entry avoids.
+function chip(x, y, text, role, fs = 16) {
+  const f = font(fs); ctx.font = f; const t = text.toUpperCase(), w = ctx.measureText(t).width + 18, h = fs + 12;
+  ctx.fillStyle = C(role); roundRect(x, y, w, h, h / 2); ctx.fill(); ctx.fillStyle = '#fff';
+  ctx.font = f; ctx.textBaseline = 'top'; ctx.fillText(t, x + 9, y + 6);
+  return [w, h];
+}
+
+// ---------------------------------------------------------------- panels
+function panel(x, y, w, h, draw) {
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); draw(x, y, w, h); ctx.restore();
+  if (MODE === 'dont') { ctx.lineWidth = 1; ctx.strokeStyle = '#9aa0aa'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+  else { ctx.lineWidth = 5; ctx.strokeStyle = C('ink'); ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5); }
+}
+// The station at night, the team coming in with the sled. Positions are relative to the panel.
+function exterior(x, y, w, h, t) {
+  backdrop('bg-exterior', x, y, w, h, 0.5, 0.35);
+  const by = y + h * 0.9, X = u => x + u * w / 840;
+  // cast shadows first, so the figures stand on them
+  const sled = figure('sled', X(160), by + 6, { w: 230 });
+  const pull = figure('rescuer-pull', X(300), by, { h: 196 });
+  if (MODE !== 'dont' && sled && pull) brush([[sled.x + sled.w - 8, sled.y + sled.h * 0.45], [(sled.x + sled.w + pull.x) / 2 + 10, by - 40], [pull.x + pull.w * 0.12, pull.y + pull.h * 0.48]], 3.5);
+  const fl = figure('rescuer-flare', X(430), by + 2, { h: 236 });
+  figure('dog', X(560), by + 6, { w: 132 });
+  if (MODE === 'dont' && fl) { glow(fl.x + fl.w * 0.8, fl.y + 20, 120, 'rgba(255,170,80,0.9)'); glow(X(700), y + h * 0.55, 90, 'rgba(255,200,120,0.85)'); }
+  flakes(x, y, w, h, 90, 9, t);
+  caption(x + 20, y + 20, 300, '02:40. The pass closed an hour ago.');
+  caption(x + w - 320, y + 20, 300, 'Two climbers are still on the north face.');
+}
+function radioRoom(x, y, w, h, t, o = {}) {
+  backdrop('bg-radio-room', x, y, w, h, 0.3, 0.4);
+  const k = h / 252;
+  const set = figure('radio-set', x + w * 0.76, y + h * 0.8, { w: 112 * k });
+  figure('operator', x + w * 0.27, y + h + 4, { h: 190 * k });
+  if (MODE === 'dont' && set) glow(set.x + set.w * 0.8, set.y + set.h * 0.7, 70, 'rgba(255,170,80,0.9)');
+  if (!o.noBalloon) balloon(x + w - 236, y + 8, 228, 'Station to Team Two. Do you read? Over.', [x + w * 0.4, y + h * 0.42]);
+}
+function dogClose(x, y, w, h, t) {
+  backdrop('bg-slope', x, y, w, h, 0.5, 0.3);
+  const d = figure('dog-close', x + w * 0.42, y + h + 6, { h: h * 1.0 });
+  if (MODE === 'dont' && d) glow(d.x + d.w * 0.5, d.y + d.h * 0.7, 60, 'rgba(255,190,90,0.9)');
+  flakes(x, y, w, h, 40, 17, t);
+  caption(x + 12, y + 12, 180, 'The dog has the scent.', { fs: 18 });
+  sfx('RUFF!', x + w - 12, y + h - 70, 44, -0.08);
+}
+function page() {
+  if (MODE === 'dont') { const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#d9dde4'); g.addColorStop(1, '#9aa3b0'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+  else paperRect(0, 0, W, H);
+}
+
+// ---------------------------------------------------------------- frames
+const KEY_CHOICES = ['Send the dog ahead', 'Hold at the hut', 'Radio the valley'];
+function keyScene(t, focus = 0) {
+  page();
+  panel(16, 16, 840, 520, (x, y, w, h) => exterior(x, y, w, h, t));
+  panel(872, 16, 392, 252, (x, y, w, h) => radioRoom(x, y, w, h, t));
+  panel(872, 284, 392, 252, (x, y, w, h) => dogClose(x, y, w, h, t));
+  if (MODE === 'dont') {           // the web look: a boxed question, pill chips, equal boxed buttons
+    caption(16, 556, 420, 'What does the station do?', { title: true, fs: 24 });
+    let cx = 452; for (const [text, role] of [['Wind 70 km/h', 'signal-alert'], ['Battery 40%', 'signal-ok']]) cx += chip(cx, 562, text, role)[0] + 10;
+    KEY_CHOICES.forEach((c, i) => caption(16 + i * 276, 620, 260, `[${i + 1}] ${c}`, { h: 60, dark: i === focus }));
+  } else {
+    label(22, 556, 'What does the station do?');
+    let sx = 590; sx += stat(sx, 552, WIND, '70', 'km/h') + 26; stat(sx, 552, BATT(0.4), '40', '%');
+    const sh = Math.max(...KEY_CHOICES.map(c => slip(0, 0, 262, c, { measure: true })));
+    if (622 + sh > 708) OVERFLOW.push('key-scene choices');
+    const rots = [-0.03, 0.022, -0.012];
+    KEY_CHOICES.forEach((c, i) => slip(18 + i * 282, 626, 262, c, { key: i + 1, focus: i === focus, rot: rots[i], seed: 11 + i, h: sh }));
+  }
+  note(884, 572, 364, 'Ridge route is iced. Take the gully, and keep the radio warm.', -0.044);
+}
+function characterFrame() {
+  page();
+  panel(16, 16, 780, 688, (x, y, w, h) => {
+    backdrop('bg-slope', x, y, w, h, 0.5, 0.5);
+    const by = y + h - 70;
+    figure('rescuer-flare', x + 300, by + 4, { h: 560 });
+    figure('dog', x + 590, by + 12, { w: 330 });
+    flakes(x, y, w, h, 70, 23, 0.4);
+  });
+  panel(812, 16, 452, 300, (x, y, w, h) => {
+    paperRect(x, y, w, h);
+    const keep = MODE; MODE = 'sil';
+    figure('rescuer-flare', x + 130, y + h - 12, { h: 250 }); figure('dog', x + 330, y + h - 12, { w: 190 });
+    MODE = keep;
+    caption(x + 14, y + 12, 220, 'Silhouette test', { title: true, fs: 22 });
+  });
+  panel(812, 332, 452, 372, (x, y, w, h) => {
+    paperRect(x, y, w, h);
+    caption(x + 14, y + 12, 424, 'Roles: ' + P.name, { title: true, fs: 22 });
+    ROLES.forEach((r, i) => {
+      const rx = x + 16 + (i % 2) * 214, ry = y + 70 + Math.floor(i / 2) * 74;
+      ctx.fillStyle = C(r); ctx.fillRect(rx, ry, 56, 56); ctx.lineWidth = 3; ctx.strokeStyle = C('ink'); ctx.strokeRect(rx + 1.5, ry + 1.5, 53, 53);
+      ctx.fillStyle = C('ink'); ctx.font = font(18); ctx.textBaseline = 'top'; ctx.fillText(r.toUpperCase(), rx + 66, ry + 6);
+      ctx.font = `400 16px ${LET}`; ctx.fillText(C(r), rx + 66, ry + 32);
+    });
+  });
+}
+// A name tag for an object: a small slip without a key.
+function tag(x, y, text, rot) {
+  const f = font(18); ctx.font = f; const w = ctx.measureText(text.toUpperCase()).width + 28, h = 34, pts = tornRect(w, h, text.length * 7);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.save(); ctx.translate(4, 4); path(pts); ctx.fillStyle = C('ink'); ctx.fill(); ctx.restore();
+  path(pts); ctx.fillStyle = C('paper'); ctx.fill(); grain(-6, -6, w + 12, h + 12, pts); path(pts); ctx.lineWidth = 2; ctx.strokeStyle = C('ink'); ctx.stroke();
+  ctx.fillStyle = C('ink'); ctx.font = f; ctx.textBaseline = 'top'; ctx.fillText(text.toUpperCase(), 14, 8); ctx.restore();
+}
+function propFrame() {
+  page();
+  panel(16, 16, 820, 688, (x, y, w, h) => {
+    ctx.fillStyle = C('field-2'); ctx.fillRect(x, y, w, h);
+    hatch(rectPts(x, y, w, 120), 8, -0.85, 2);
+    fillRole([[x, y + 470], [x + w, y + 456], [x + w, y + h], [x, y + h]], 'field-3');
+    brush([[x, y + 470], [x + w / 2, y + 462], [x + w, y + 456]], 5);
+    figure('sled', x + 410, y + 572, { w: 700 });
+    tag(x + 24, y + 24, 'Rescue sled', -0.03);
+  });
+  panel(852, 16, 412, 330, (x, y, w, h) => {
+    ctx.fillStyle = C('field-2'); ctx.fillRect(x, y, w, h);
+    fillRole([[x, y + 250], [x + w, y + 240], [x + w, y + 268], [x, y + 278]], 'field-3');
+    fillRole([[x, y + 277], [x + w, y + 267], [x + w, y + h], [x, y + h]], 'ink');
+    figure('radio-set', x + w / 2, y + 262, { w: 330 });
+    tag(x + 16, y + 16, 'Radio set', -0.025);
+  });
+  panel(852, 362, 412, 342, (x, y, w, h) => {
+    ctx.fillStyle = C('field-1'); ctx.fillRect(x, y, w, h);
+    fillRole([[x, y + 250], [x + w, y + 240], [x + w, y + h], [x, y + h]], 'field-3');
+    figure('thermos', x + 70, y + 270, { h: 150 });
+    figure('rope', x + 205, y + 274, { w: 150 });
+    figure('ice-axe', x + 340, y + 272, { h: 210 });
+    [['Thermos', 14, 292, 0.02], ['Rope', 160, 296, -0.02], ['Ice axe', 290, 292, 0.015]].forEach(([s, tx, ty, r]) => tag(x + tx, y + ty, s, r));
+  });
+}
+// The busiest screen at worst-case content: everything wraps, nothing is cut.
+function fitColumn(name, x, y, w, bottom, items, gap = 14) {
+  for (let fs = 20; fs >= 16; fs--) {
+    const hs = items.map(it => it(fs, true, x, 0, w)), total = hs.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
+    if (total <= bottom - y || fs === 16) {
+      if (total > bottom - y) OVERFLOW.push(`${name}: ${Math.round(total)} px in ${bottom - y}`);
+      let yy = y; items.forEach((it, i) => { it(fs, false, x, yy, w); yy += hs[i] + gap; });
+      return fs;
+    }
+  }
+}
+function card(d) {
+  return (fs, measure, x, y, w) => {
+    const pad = 10, inner = w - 2 * pad - 70, small = Math.max(16, fs - 2), nf = font(fs + 2, 'tit'), rf = font(small), lhN = Math.round((fs + 2) * 1.2), lhR = Math.round(small * 1.25);
+    const name = wrap(d.name, nf, inner), role = wrap(d.role.toUpperCase(), rf, inner), noteL = wrap(d.note, `400 ${small}px ${LET}`, inner);
+    const h = Math.max(78, pad + name.length * lhN + 4 + role.length * lhR + 6 + noteL.length * lhR + pad);
+    if (measure) return h;
+    ctx.fillStyle = C('ink'); ctx.fillRect(x + 5, y + 5, w, h); paperRect(x, y, w, h);
+    ctx.lineWidth = 3; ctx.strokeStyle = C('ink'); ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    let yy = y + pad; ctx.fillStyle = C('ink'); ctx.textBaseline = 'top';
+    ctx.font = nf; name.forEach(l => { ctx.fillText(l, x + pad, yy); yy += lhN; }); yy += 4;
+    ctx.font = rf; role.forEach(l => { ctx.fillText(l, x + pad, yy); yy += lhR; }); yy += 6;
+    ctx.font = `400 ${small}px ${LET}`; noteL.forEach(l => { ctx.fillText(l, x + pad, yy); yy += lhR; });
+    // condition as a mark at the right edge: a stamped word on a signal patch
+    const mx = x + w - 66, my = y + 10;
+    ctx.save(); ctx.translate(mx + 28, my + 22); ctx.rotate(-0.12);
+    ctx.fillStyle = C(d.cond[1]); ctx.fillRect(-28, -16, 56, 32); ctx.lineWidth = 2.5; ctx.strokeStyle = C('ink'); ctx.strokeRect(-28, -16, 56, 32);
+    ctx.fillStyle = C('ink'); ctx.font = font(16); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.cond[0].toUpperCase(), 0, 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.restore();
+    return h;
+  };
+}
+function textHeavy() {
+  page();
+  const th = caption(16, 16, 760, 'Night 3 · 02:40 · Storm front over the north face', { title: true, fs: 22 });
+  const top = 16 + th + 18;
+  // the conditions, as marks on the page
+  let sx = 792; sx += stat(sx, 14, WIND, '70', '/95') + 18; stat(sx, 14, EYE, '20', 'm');
+  panel(16, top, 400, 200, (x, y, w, h) => radioRoom(x, y, w, h, 0, { noBalloon: true }));
+  { let ix = 24; ix += stat(ix, top + 212, BATT(0.4), '40', '%') + 24; stat(ix, top + 212, SILENT, '30', 'min'); }
+  const log = 'Radio log\n02:05  Wind rising on the ridge. Team Two takes the gully.\n02:10  Two climbers in sight below the couloir. One cannot walk.\n02:31  Signal breaking up. Last words: "sled is loaded".\n02:40  No contact. The valley asks for an update.';
+  fitColumn('log', 16, top + 262, 400, 704, [
+    (fs, m, x, y, w) => caption(x, y, w, log, { fs: Math.max(16, fs - 2), measure: m, dark: true }),
+  ], 8);
+  fitColumn('roster', 432, top, 416, 704, [
+    card({ name: 'Wilhelmina Oyelaran-Castellanos', role: 'Team lead · mountain guide · north face', cond: ['Cold', 'signal-ok'], note: 'Carries the flare kit and the second radio.' }),
+    card({ name: 'Teodor Abramczyk-Lindqvist', role: 'Medic · north face', cond: ['Numb', 'signal-alert'], note: 'Splinting the climber who cannot walk.' }),
+    card({ name: 'Kip, the avalanche dog', role: 'Search dog · with Team Two', cond: ['Tired', 'signal-alert'], note: 'Found the climbers by scent at 02:10.' }),
+  ], 12);
+  const orders = [['Lower both climbers to the hut tonight, using the sled', { focus: true }],
+    ['Dig a snow shelter and wait for the wind to drop before dawn', {}],
+    ['Send the dog down alone with a message for the valley', {}],
+    ['Call the valley helicopter', { off: true, reason: 'needs visibility over 200 m' }]];
+  const rots = [-0.02, 0.016, -0.012, 0.01];
+  fitColumn('orders', 868, top, 392, 704, [
+    (fs, m, x, y, w) => { if (!m) label(x + 2, y, 'Orders for Team Two', fs + 6); return fs + 10; },
+    ...orders.map(([t, o], i) => (fs, m, x, y, w) => slip(x, y + (o.focus ? 8 : 0), w - 10, t, Object.assign({ fs, measure: m, key: i + 1, rot: rots[i], seed: 31 + i }, o)) + (o.focus ? 8 : 0)),
+    (fs, m, x, y, w) => m ? note(0, 0, w - 8, 'Gully is safer than the ridge tonight. Check the batteries every hour.', -0.03, fs, true)
+      : (note(x + 4, y + Math.sin(0.03) * w, w - 8, 'Gully is safer than the ridge tonight. Check the batteries every hour.', -0.03, fs), 0),
+  ], 12);
+}
+function dontFrame() {
+  MODE = 'dont';
+  keyScene(0);
+  glow(1180, 600, 160, 'rgba(255,120,40,0.7)');            // a second and third warm thing
+  ctx.fillStyle = '#ff5a1f'; roundRect(1150, 640, 100, 40, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '12px Arial,sans-serif'; ctx.textBaseline = 'top'; ctx.fillText('CONTINUE ›', 1166, 654);
+  MODE = 'ink';
+}
+
+// ---------------------------------------------------------------- boot
+const FRAMES = { 'key-scene': () => keyScene(0.4), 'character': characterFrame, 'prop': propFrame, 'text-heavy': textHeavy, 'dont': dontFrame };
+async function boot() {
+  const q = new URLSearchParams(location.search), frame = q.get('frame');
+  if (frame) palName = 'night';                 // frames are captured in the example palette
+  else palName = 'pulp';                         // the interactive demo opens on the bright palette
+  if (q.get('palette') && PALETTES[q.get('palette')]) palName = q.get('palette');
+  P = PALETTES[palName];
+  await loadArt();
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  if (frame) {
+    // frame mode: a fixed 1280x720 canvas at the page's top-left, drawn once, no loop
+    document.body.classList.add('frame');
+    (FRAMES[frame] || FRAMES['key-scene'])();
+    if (OVERFLOW.length) console.warn('layout overflow', OVERFLOW);
+    document.title = 'ready';
+    return;
+  }
+  let view = 'key-scene', t = 0, timer = null, focus = 0;
+  const ui = document.getElementById('ui');
+  const fit = () => { const k = Math.min(innerWidth / W, (innerHeight - 44) / H); cv.style.width = W * k + 'px'; cv.style.height = H * k + 'px'; cv.style.left = (innerWidth - W * k) / 2 + 'px'; };
+  const render = () => { if (view === 'key-scene') keyScene(t, focus); else FRAMES[view](); };
+  const drawUi = () => {
+    ui.innerHTML = 'palette: ' + Object.keys(PALETTES).map(n => `<button data-p="${n}"${n === palName ? ' disabled' : ''}>${PALETTES[n].name}</button>`).join('') +
+      ' ' + ROLES.map(r => `<span class="sw" title="${r}" style="background:${P[r]}"></span>`).join('') +
+      ' &nbsp;frame: ' + Object.keys(FRAMES).map(n => `<button data-v="${n}"${n === view ? ' disabled' : ''}>${n}</button>`).join('');
+  };
+  ui.addEventListener('click', e => {
+    const d = e.target.dataset || {};
+    if (d.p) { palName = d.p; P = PALETTES[palName]; }
+    if (d.v) view = d.v;
+    if (d.p || d.v) { drawUi(); render(); }
+  });
+  // keys 1-3 and the arrows move the lifted slip
+  addEventListener('keydown', e => {
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 3) focus = n - 1;
+    else if (e.key === 'ArrowRight') focus = (focus + 1) % 3;
+    else if (e.key === 'ArrowLeft') focus = (focus + 2) % 3;
+    else return;
+    render();
+  });
+  // idle: at most 10 fps (falling snow), paused while the tab is hidden
+  const step = () => { t += 0.1; if (view === 'key-scene') render(); };
+  const run = () => { if (!timer) timer = setInterval(step, 100); };
+  const stop = () => { clearInterval(timer); timer = null; };
+  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : run()));
+  addEventListener('resize', fit);
+  fit(); drawUi(); render(); run();
+}
+if (typeof document !== 'undefined' && !window.__NO_BOOT) boot();
+</script>
+</body>
+</html>

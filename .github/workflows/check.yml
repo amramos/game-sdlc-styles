@@ -1,0 +1,21 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The checker lives in the SDLC plugin, so the site and the plugin never drift apart.
+      - uses: actions/checkout@v4
+        with:
+          repository: amramos/game-ai-sdlc
+          path: .sdlc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check every entry, frame, demo page and Godot match
+        run: python .sdlc/plugins/game-sdlc/skills/style-catalog/scripts/check_entries.py .

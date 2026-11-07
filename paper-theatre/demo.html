@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper theatre demo</title>
+<style>
+  :root { --ink:#2B2118; --paper:#F3EAD2; --card:#5A3E2B; --house:#241A1E; --accent:#0FA3D6;
+          --signal-good:#226E2F; --signal-bad:#9C2A1E; --signal-info:#5B3A8C; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--house); }
+  body { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; color:var(--ink); }
+  canvas#c { display:block; position:absolute; left:0; top:0; }
+  body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
+  body.dont canvas#c { filter:saturate(2.3) contrast(1.15); }
+
+  /* demo controls (hidden in frame mode) */
+  #controls { position:absolute; right:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; z-index:5; }
+  #controls label, #controls button, #controls select {
+    font:inherit; font-size:16px; color:var(--ink); background:var(--paper);
+    border:2px solid var(--ink); border-radius:0; padding:5px 10px; box-shadow:3px 3px 0 var(--card);
+  }
+  #controls button[aria-pressed="true"] { outline:3px solid var(--accent); outline-offset:1px; }
+  body.frame #controls { display:none; }
+
+  /* the interface: a 1280x720 box over the stage, scaled to fit outside frame mode */
+  #hud { position:absolute; left:0; top:0; width:1280px; height:720px; transform-origin:0 0; pointer-events:none; }
+  body.frame #hud { position:fixed; }
+  .busy { display:none; }
+  #hud.on .busy { display:block; }
+  /* a paper slip: torn edge (clip-path set in code), dark card edge as a hard drop shadow */
+  .sw { position:absolute; filter:drop-shadow(2px 3px 0 var(--card)) drop-shadow(5px 8px 6px rgba(0,0,0,.35)); }
+  .slip { background:var(--paper); color:var(--ink); padding:9px 12px 11px; font-size:16px; line-height:1.3; }
+  .slip h3 { margin:0 0 6px; font-size:20px; font-weight:700; font-variant:small-caps; letter-spacing:.03em; line-height:1.1; text-align:center; }
+  .slip h4 { margin:0 0 2px; font-size:19px; font-weight:700; font-variant:small-caps; letter-spacing:.04em; }
+  .slip p { margin:0; }
+  .slip ul { list-style:none; margin:0; padding:0; }
+  .slip hr { border:0; border-top:1.5px solid var(--ink); margin:7px 0; }
+  .tack { position:absolute; width:12px; height:12px; border-radius:50%; background:var(--card); border:2px solid var(--ink); left:50%; top:-4px; margin-left:-8px; z-index:2; }
+  .wire { position:absolute; width:1.5px; background:var(--ink); bottom:100%; height:160px; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:16px; font-weight:700; color:var(--paper); padding:1px 7px 2px 4px; line-height:1.2; white-space:nowrap; }
+  .chip b { display:inline-grid; place-items:center; width:17px; height:17px; border:1.5px solid var(--paper); border-radius:50%; font-size:12px; }
+  .good { background:var(--signal-good); } .bad { background:var(--signal-bad); } .info { background:var(--signal-info); }
+
+  /* inventory: a stamped glyph and a count per line */
+  .inv li { display:flex; align-items:center; gap:8px; padding:2px 0; }
+  .inv svg { width:22px; height:22px; flex:none; }
+  .inv .n { margin-left:auto; font-weight:700; font-variant-numeric:oldstyle-nums; }
+  /* meters: printed pips */
+  .meter { display:flex; align-items:center; gap:7px; margin-top:4px; }
+  .meter svg { width:22px; height:22px; flex:none; }
+  .pips { display:flex; gap:3px; }
+  .pips i { width:7px; height:14px; border:1.5px solid var(--ink); }
+  .pips i.f { background:var(--ink); }
+  .pips.sun i { width:13px; height:13px; border-radius:50%; }
+  .pips.sun i.f { background:#DDBE68; }
+  .meter .v { font-weight:700; margin-left:auto; }
+
+  /* playbill: struck past scenes, the current one marked */
+  .bill li { padding:3px 0 3px 22px; position:relative; border-bottom:1px dotted color-mix(in srgb, var(--ink) 45%, transparent); }
+  .bill li:last-child { border-bottom:0; }
+  .bill li::before { content:attr(data-n); position:absolute; left:0; font-weight:700; font-variant-numeric:oldstyle-nums; }
+  .bill li.past { text-decoration:line-through; text-decoration-thickness:1.5px; opacity:.7; }
+  .bill li.now { font-weight:700; }
+  .bill li.now::before { content:""; }
+  .bill li.now::after { content:""; position:absolute; left:2px; top:8px; width:9px; height:9px; background:var(--accent); outline:1.5px solid var(--ink); transform:rotate(45deg); }
+
+  .quote { font-style:italic; font-size:18px; line-height:1.3; }
+  .choices li { display:flex; align-items:center; gap:10px; padding:4px 6px 4px 30px; position:relative; border-top:1px solid color-mix(in srgb, var(--ink) 25%, transparent); }
+  .choices li:first-child { border-top:0; }
+  .choices .k { position:absolute; left:4px; top:5px; width:18px; height:18px; border:1.5px solid var(--ink); display:grid; place-items:center; font-size:13px; font-weight:700; line-height:1; }
+  .choices li.focus { box-shadow:inset 5px 0 0 var(--accent); font-weight:700; background:color-mix(in srgb, var(--accent) 12%, var(--paper)); }
+  .choices li.focus .k { background:var(--ink); color:var(--paper); }
+  .choices li.no > span:nth-child(2) { opacity:.6; }
+  .choices .tags { display:flex; gap:6px; flex:none; margin-left:auto; }
+  .tag .slip { padding:1px 9px 2px; font-variant:small-caps; font-size:16px; white-space:nowrap; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <label>Lighting <select id="mood"></select></label>
+  <button id="bHud" aria-pressed="false">Busiest screen</button>
+</div>
+
+<!-- The interface. Every slip is pinned to the frame, flown on wires or tagged to a figure: nothing
+     floats as a menu bar. Positions are in the 1280x720 frame. Only ".busy" slips wait for the
+     busiest screen. -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-loaf" viewBox="0 0 24 24"><path d="M3 15c0-6 4-9 9-9s9 3 9 9v3H3z" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M8 9l-1 5M12 8v6M16 9l1 5" stroke="currentColor" stroke-width="1.4" fill="none"/></symbol>
+    <symbol id="i-honey" viewBox="0 0 24 24"><path d="M6 9h12l-1 11H7z" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M5 5h14v4H5z" fill="#C8574A" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-specs" viewBox="0 0 24 24"><circle cx="7" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 14h2M3 13l-1-4M21 13l1-4" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
+    <symbol id="i-oil" viewBox="0 0 24 24"><path d="M9 3h6v4l3 3v11H6V10l3-3z" fill="#A9B2B8" stroke="currentColor" stroke-width="1.6"/><path d="M6 15h12v6H6z" fill="#B08355" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-wool" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#9A968F" stroke="currentColor" stroke-width="1.6"/><path d="M6 8c4 2 8 6 9 11M9 5c3 3 8 5 10 10M5 14c3 0 6 3 7 6" stroke="currentColor" stroke-width="1.2" fill="none"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21C5 15 2 12 2 8a5 5 0 0 1 10-1 5 5 0 0 1 10 1c0 4-3 7-10 13z" fill="#C8574A" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="#DDBE68" stroke="currentColor" stroke-width="1.6"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4M4 4l3 3M17 17l3 3M20 4l-3 3M7 17l-3 3" stroke="currentColor" stroke-width="1.6"/></symbol>
+  </defs>
+</svg>
+<div id="hud">
+  <!-- left pillar: the basket and the girl's state, always pinned -->
+  <div class="sw" id="slipBasket" style="width:172px">
+    <div class="slip">
+      <h3>Basket</h3>
+      <ul class="inv">
+        <li><svg><use href="#i-loaf"/></svg>Rye loaf<span class="n">2</span></li>
+        <li><svg><use href="#i-honey"/></svg>Honey<span class="n">1</span></li>
+        <li><svg><use href="#i-specs"/></svg>Spectacles<span class="n">1</span></li>
+        <li><svg><use href="#i-oil"/></svg>Lamp oil<span class="n">½</span></li>
+        <li><svg><use href="#i-wool"/></svg>Grey wool<span class="n">1</span></li>
+      </ul>
+      <hr>
+      <div class="meter"><svg><use href="#i-heart"/></svg><span class="pips"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i></span></div>
+      <div class="meter"><svg><use href="#i-sun"/></svg><span class="pips sun"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></span></div>
+      <div class="busy" style="margin-top:6px"><span class="chip bad"><b>!</b>Dusk soon</span></div>
+    </div>
+    <span class="tack"></span>
+  </div>
+
+  <!-- right pillar: tonight's playbill -->
+  <div class="sw busy" id="slipBill" style="width:172px">
+    <div class="slip">
+      <h3>Tonight</h3>
+      <ul class="bill">
+        <li class="past" data-n="1">Cottage Door</li>
+        <li class="past" data-n="2">Over the Stile</li>
+        <li class="now" data-n="3">The Birch Wood</li>
+        <li data-n="4">Woodcutter's Camp</li>
+        <li data-n="5">The Mill Race at Twilight</li>
+        <li data-n="6">Grandmother's Gate</li>
+      </ul>
+    </div>
+    <span class="tack"></span>
+  </div>
+
+  <!-- the wolf's line and the four choices, flown in on two wires above the cast -->
+  <div class="sw busy" id="slipTalk" style="width:640px">
+    <span class="wire" style="left:46px"></span><span class="wire" style="right:46px"></span>
+    <div class="slip">
+      <h4>The Wolf</h4>
+      <p class="quote">“Such a heavy basket for such a long road, little one. The birches hide a shorter way — shall I show you where the path forks past the old charcoal pits?”</p>
+      <hr>
+      <ul class="choices">
+        <li><span class="k">1</span><span>Share the honey and ask the way</span><span class="tags"><span class="chip info"><b>i</b>−1 honey</span><span class="chip good"><b>✓</b>Friendlier</span></span></li>
+        <li><span class="k">2</span><span>Take the long road past the camp</span><span class="tags"><span class="chip bad"><b>!</b>−1 daylight</span></span></li>
+        <li class="focus"><span class="k">3</span><span>Hide in the woodcutter's cart</span><span class="tags"><span class="chip good"><b>✓</b>Cart is close</span></span></li>
+        <li class="no"><span class="k">4</span><span>Stare the wolf down</span><span class="tags"><span class="chip bad"><b>×</b>Needs courage 8</span></span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- the detail card under the figure the pointer is on; it takes the place of that figure's name tag -->
+  <div class="sw busy" id="wolfCard" style="width:186px">
+    <div class="slip">
+      <h4>The Wolf</h4>
+      <span class="chip bad"><b>!</b>Hungry at dusk</span>
+      <span class="chip info" style="margin-top:4px"><b>i</b>Knows a short way</span>
+    </div>
+  </div>
+
+  <div class="sw tag busy" id="tagGirl"><div class="slip">The Girl</div></div>
+    <div class="sw tag busy" id="tagCart"><div class="slip">The Cart</div></div>
+</div>
+
+<!-- Lighting plots. The printed set is the same in every scheme; the lights, the house and the
+     card edge change. Each fills the colour roles of style.md and passes its colour-rules.
+     "dont" is only for ?frame=dont and breaks the rules on purpose. -->
+<script type="application/json" id="moods">
+{
+ "matinee": {"label":"Matinee (bright)",
+  "colours": {"ink":"#2B2118","paper":"#F3EAD2","card":"#5A3E2B","house":"#241A1E","boards":"#7A5A40",
+   "accent":"#0FA3D6","signal-good":"#226E2F","signal-bad":"#9C2A1E","signal-info":"#5B3A8C",
+   "light-key":"#FFF1D8","light-fill":"#DDE9F2","light-foot":"#FFD9A0"},
+  "light": {"hemi":1.05,"key":2.0,"fill":0.9,"foot":0.55,"pin":0,"vignette":0.22}},
+ "night": {"label":"Night (ominous)",
+  "colours": {"ink":"#1E1B26","paper":"#E9E3CF","card":"#3B3346","house":"#07060A","boards":"#5A4A50",
+   "accent":"#22C9C0","signal-good":"#256C35","signal-bad":"#962A2C","signal-info":"#573A8C",
+   "light-key":"#A8BCFF","light-fill":"#3A4566","light-foot":"#FF9E58"},
+  "light": {"hemi":0.4,"key":1.5,"fill":0.6,"foot":1.8,"pin":2.2,"vignette":0.55}},
+ "dont": {"label":"Don't",
+  "colours": {"ink":"#000000","paper":"#FFFFFF","card":"#000000","house":"#000000","boards":"#FFB000",
+   "accent":"#FF00FF","signal-good":"#00FF00","signal-bad":"#FF0000","signal-info":"#0000FF",
+   "light-key":"#FFFFFF","light-fill":"#FFFFFF","light-foot":"#FFFFFF"},
+  "light": {"hemi":2.6,"key":0.0,"fill":0.0,"foot":0.0,"pin":0,"vignette":0}}
+}
+</script>
+
+<script src="assets/images.js"></script>  <!-- images embedded so WebGL accepts them from file:// -->
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// ---------- setup ----------
+const params = new URLSearchParams(location.search);
+const FRAME = params.get('frame');                 // key-scene | character | prop | text-heavy | dont
+const DONT = FRAME === 'dont';
+const MOODS = JSON.parse(document.getElementById('moods').textContent);
+let moodName = (MOODS[params.get('mood')] && params.get('mood') !== 'dont') ? params.get('mood') : 'matinee';
+const mood = () => DONT ? MOODS.dont : MOODS[moodName];
+const C = () => mood().colours;
+if (FRAME) document.body.classList.add('frame');
+if (DONT) document.body.classList.add('dont');
+let needRender = true, last = 0, running = false;
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.toneMapping = THREE.NoToneMapping;          // printed colours land as authored
+renderer.shadowMap.enabled = !DONT;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const BASE_FOV = 38;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 16 / 9, 0.1, 100);
+const HOME = { pos: new THREE.Vector3(0, 2.0, 16.5), look: new THREE.Vector3(0, 0.15, 0) };
+let view = { pos: HOME.pos.clone(), look: HOME.look.clone(), fov: BASE_FOV };
+const FLOOR = -1.6;
+
+// ---------- the printed pieces: every one is its own generated image (assets/README.md) ----------
+// Cut-outs carry their paper border in the image; the dark card edge is a second plane drawn here.
+const FILES = {
+  backcloth: 'backcloth.jpg', floor: 'floor.jpg', proscenium: 'proscenium.png', valance: 'valance.png',
+  drape: 'drape.png', rowFar: 'row-far.png', rowMid: 'row-mid.png', rowNear: 'row-near.png',
+  birch: 'wing-birch.png', oak: 'wing-oak.png', girl: 'girl.png', wolf: 'wolf.png', cart: 'cart.png',
+  girlDont: 'girl-dont.png', wolfDont: 'wolf-dont.png',
+};
+// the stage opening inside proscenium.png, in its pixels (measured when the frame was keyed)
+const OPENING = { w: 1024, h: 585, x0: 217.7, x1: 815.4, y0: 158.9, y1: 472.0 };
+const OPEN_H = 7.8 * (OPENING.y1 - OPENING.y0) / (OPENING.x1 - OPENING.x0);   // 7.8 wide, height from the frame
+const TOP = FLOOR + OPEN_H;     // the opening's top edge
+const BORDER = 0.06;            // paper border, world units (baked into each cut-out's image)
+const TEX = {};
+const manager = new THREE.LoadingManager();
+const loader = new THREE.TextureLoader(manager);
+for (const [k, f] of Object.entries(FILES)) {
+  TEX[k] = loader.load(IMG('assets/' + f));
+  TEX[k].colorSpace = THREE.SRGBColorSpace; TEX[k].anisotropy = 8;
+}
+const aspect = t => t.image.width / t.image.height;
+
+const backMats = [];
+// the card edge: a plane behind the print that keeps only the image's alpha, in the card colour
+function cardMaterial(tex) {
+  const m = new THREE.MeshStandardMaterial({ color: C().card, map: tex, alphaTest: 0.5, roughness: 0.95 });
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+    'vec4 sampledDiffuseColor = texture2D( map, vMapUv ); diffuseColor.a *= sampledDiffuseColor.a;'); };
+  m.shadowSide = THREE.DoubleSide; backMats.push(m); return m;
+}
+// A cut-out: printed front (alpha-tested, so its shadow follows the silhouette) plus the card edge.
+// h: world height of the image; the art's bottom edge (inside the border) sits at y.
+function stand(tex, { h, w, x, z, y = FLOOR, yaw = 0, shadow = true, flip = false, repeat = 1, edge = true }) {
+  const g = new THREE.Group();
+  w = w ?? h * aspect(tex);
+  const geo = new THREE.PlaneGeometry(w, h); geo.translate(0, h / 2 - BORDER, 0);
+  let t = tex;
+  if (repeat !== 1) { t = tex.clone(); t.wrapS = THREE.RepeatWrapping; t.repeat.x = repeat; t.needsUpdate = true; }
+  const mat = DONT ? new THREE.MeshBasicMaterial({ map: t, alphaTest: 0.5 })
+    : new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, roughness: 0.92, metalness: 0 });
+  mat.shadowSide = THREE.DoubleSide;
+  const front = new THREE.Mesh(geo, mat);
+  front.castShadow = shadow; front.receiveShadow = true;
+  front.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: t, alphaTest: 0.5 });
+  g.add(front);
+  if (edge && !DONT) {
+    const b = new THREE.Mesh(geo, cardMaterial(t));
+    b.position.set(0.022, -0.022, -0.018); b.scale.set(1 + 0.03 / w, 1 + 0.03 / h, 1);
+    b.castShadow = shadow; b.receiveShadow = true;
+    b.customDepthMaterial = front.customDepthMaterial;
+    g.add(b);
+  }
+  if (flip) g.scale.x = -1;
+  g.position.set(x, y, z); g.rotation.y = DONT ? 0 : yaw;
+  scene.add(g); return g;
+}
+const wireMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5, metalness: 0.4 });
+function wire(x, y0, y1, z) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, y1 - y0, 5), wireMat); m.position.set(x, (y0 + y1) / 2, z); scene.add(m); return m; }
+// a slide: the rod a figure is pushed on from the wings, with its bent tab at the figure's foot
+function slide(x0, x1, z) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, Math.abs(x1 - x0), 6), wireMat);
+  m.rotation.z = Math.PI / 2; m.position.set((x0 + x1) / 2, FLOOR + 0.03, z); scene.add(m); return m;
+}
+// a rod from the fly: a thin wire straight up from the top of a flown piece
+const houseMat = new THREE.MeshBasicMaterial({ color: C().house });
+
+let girl, wolf, cart, placard, placardWires = [], rigs = [], markers = [];
+const pieces = {};
+
+function build() {
+  // house: the wall around the arch
+  { const sh = new THREE.Shape([new THREE.Vector2(-30, -20), new THREE.Vector2(30, -20), new THREE.Vector2(30, 20), new THREE.Vector2(-30, 20)]);
+    sh.holes.push(new THREE.Path([new THREE.Vector2(-3.95, -1.65), new THREE.Vector2(-3.95, TOP + 0.05), new THREE.Vector2(3.95, TOP + 0.05), new THREE.Vector2(3.95, -1.65)]));
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), houseMat); m.position.z = 4.9; scene.add(m); }
+
+  // stage floor: the plank print, mirrored so it tiles without a seam
+  const ft = TEX.floor; ft.wrapS = ft.wrapT = THREE.MirroredRepeatWrapping; ft.repeat.set(20 / 2.6, 15 / 2.6);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(20, 0.3, 15), new THREE.MeshStandardMaterial({ map: ft, roughness: 0.9 }));
+  floor.position.set(0, FLOOR - 0.15, -2.6); floor.receiveShadow = true; scene.add(floor);
+
+  // back cloth: one printed sheet, not cut
+  // 26 wide: the print at its own scale in the middle, mirrored out at the sides the wings hide
+  TEX.backcloth.wrapS = THREE.MirroredRepeatWrapping; TEX.backcloth.repeat.x = 1.3; TEX.backcloth.offset.x = -0.15;
+  { const mat = DONT ? new THREE.MeshBasicMaterial({ map: TEX.backcloth }) : new THREE.MeshStandardMaterial({ map: TEX.backcloth, roughness: 1 });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(26, 20 / aspect(TEX.backcloth)), mat);
+    m.position.set(0, FLOOR - 0.2 + 10 / aspect(TEX.backcloth), -9.5); m.receiveShadow = true; scene.add(m); }
+
+  // ground rows, each repeated along the width so it keeps the height the recipe gives it
+  const row = (tex, hTarget, z, yaw = 0) => { const n = Math.max(1, Math.round(20 / (hTarget * aspect(tex))));
+    return stand(tex, { w: 20, h: 20 / n / aspect(tex), x: 0, z, repeat: n }); };
+  pieces.rowFar = row(TEX.rowFar, 2.6, -8);
+  pieces.rowMid = row(TEX.rowMid, 1.9, -6);
+  pieces.rowNear = row(TEX.rowNear, 1.1, -4);
+
+  // wings: two pairs of tree flats at the sides, turned toward the centre
+  stand(TEX.birch, { h: 5.6, x: -4.5, z: 2.5, yaw: 0.22 });
+  stand(TEX.oak, { h: 5.6, x: 4.6, z: 2.5, yaw: -0.22, flip: true });
+  stand(TEX.oak, { h: 5.0, x: -5.0, z: -1.5, yaw: 0.2 });
+  stand(TEX.birch, { h: 5.2, x: 5.0, z: -1.5, yaw: -0.2, flip: true });
+
+  // the cast: a girl with a basket, a wolf, a woodcutter's cart
+  girl = stand(DONT ? TEX.girlDont : TEX.girl, { h: 2.05, x: -1.2, z: 0.5, yaw: 0.12, edge: !DONT });
+  wolf = stand(DONT ? TEX.wolfDont : TEX.wolf, { h: 1.55, x: 1.9, z: 0.2, yaw: -0.15, edge: !DONT });
+  if (DONT) {   // the wrong medium: a real 3D cart among flat prints
+    cart = new THREE.Group();
+    const m = c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.2 });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.4, 1.1), m('#FF7A00')); bed.position.set(0.3, 0.75, 0); cart.add(bed);
+    const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.12, 24), m('#C0C0FF')); wh.rotation.x = Math.PI / 2; wh.position.set(0.4, 0.45, 0.6); cart.add(wh);
+    for (let i = 0; i < 3; i++) { const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.3, 16), m('#FF0000')); lg.rotation.z = Math.PI / 2; lg.position.set(0.3, 1.05 + i * 0.22, -0.3 + i * 0.3); cart.add(lg); }
+    cart.position.set(-3.0, FLOOR, -1.3); scene.add(cart);
+  } else cart = stand(TEX.cart, { h: 1.75, x: -3.0, z: -1.3, yaw: 0.2 });
+  rigs = [slide(-8, -1.2, 0.48), slide(1.9, 8, 0.18)];
+
+  // proscenium: the generated frame, scaled so its keyed opening matches the stage opening
+  { const sx = 7.8 / (OPENING.x1 - OPENING.x0), sy = sx;
+    const W = OPENING.w * sx, H = OPENING.h * sy;
+    const cx = (OPENING.x0 + OPENING.x1) / 2 * sx, cy = (OPENING.y0 + OPENING.y1) / 2 * sy;
+    const mat = DONT ? new THREE.MeshBasicMaterial({ map: TEX.proscenium, alphaTest: 0.5 }) : new THREE.MeshStandardMaterial({ map: TEX.proscenium, alphaTest: 0.5, roughness: 0.85 });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat);
+    m.position.set(W / 2 - cx, FLOOR + OPEN_H / 2 - (H / 2 - cy), 5); m.receiveShadow = true; scene.add(m);
+    pieces.prosc = { W, H, x: W / 2 - cx, y: FLOOR + OPEN_H / 2 - (H / 2 - cy) }; }
+
+  // side drapes and the scalloped border, hung just inside the frame
+  // each drape's outer edge sits behind a pillar; its swag tucks behind the border
+  { const dh = OPEN_H + 0.35, dw = dh * aspect(TEX.drape), dx = 4.6 - dw / 2;
+    stand(TEX.drape, { h: dh, x: -dx, y: FLOOR + 0.02, z: 4.3, shadow: false });
+    stand(TEX.drape, { h: dh, x: dx, y: FLOOR + 0.02, z: 4.3, shadow: false, flip: true }); }
+  // the border: its top hidden behind the header, about 0.95 showing below the opening's top
+  { const vh = 8.4 / aspect(TEX.valance); stand(TEX.valance, { w: 8.4, h: vh, x: 0, y: TOP + 0.6 - vh + BORDER, z: 4.4, shadow: false }); }
+
+  // footlight hoods along the stage lip
+  { const hm = new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.6, metalness: 0.5 });
+    for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.16), hm); b.position.set(-3.4 + i * 0.85, FLOOR + 0.05, 4.65); scene.add(b); } }
+
+  // a title placard flown on wires: live text printed on a paper slip
+  { const cv = document.createElement('canvas'); cv.width = 640; cv.height = 180; const g = cv.getContext('2d');
+    const P = MOODS.matinee.colours;
+    g.fillStyle = P.card; g.fillRect(6, 10, 628, 164);
+    g.fillStyle = P.paper; g.beginPath(); const rnd = mulberry32(9);
+    for (let x = 0; x <= 620; x += 20) g.lineTo(x, rnd() * 5); for (let y = 0; y <= 160; y += 20) g.lineTo(620 - rnd() * 5, y);
+    for (let x = 620; x >= 0; x -= 20) g.lineTo(x, 160 - rnd() * 5); for (let y = 160; y >= 0; y -= 20) g.lineTo(rnd() * 5, y); g.fill();
+    g.strokeStyle = P.ink; g.lineWidth = 3; g.strokeRect(22, 20, 576, 120); g.lineWidth = 1.2; g.strokeRect(30, 28, 560, 104);
+    g.fillStyle = P.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = 'italic 700 72px "Iowan Old Style", "Palatino Linotype", Georgia, serif'; g.fillText('The Birch Wood', 310, 84);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    const mat = DONT ? new THREE.MeshBasicMaterial({ map: t }) : new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.35 });
+    placard = new THREE.Mesh(new THREE.PlaneGeometry(2.56, 0.72), mat); placard.position.set(0, TOP - 1.25, 3.6); scene.add(placard);
+    placardWires = [wire(-1.0, TOP - 0.89, TOP + 1, 3.6), wire(1.0, TOP - 0.89, TOP + 1, 3.6)]; }
+
+  // accent markers: unlit, so they read in any light; only on what the player can act on
+  marker(1.9, 0.3, 0.2);
+  marker(-3.0, 0.45, -1.3);
+}
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function marker(x, y, z) {
+  const g = new THREE.Group(), d = new THREE.Shape([new THREE.Vector2(0, 0.14), new THREE.Vector2(0.1, 0), new THREE.Vector2(0, -0.14), new THREE.Vector2(-0.1, 0)]);
+  const a = new THREE.Mesh(new THREE.ShapeGeometry(d), new THREE.MeshBasicMaterial({ color: C().accent }));
+  const o = new THREE.Mesh(new THREE.ShapeGeometry(d), new THREE.MeshBasicMaterial({ color: C().ink })); o.scale.setScalar(1.35); o.position.z = -0.005;
+  g.add(o, a); g.position.set(x, y, z); g.userData = { baseY: y, a };
+  const w = wire(x, y + 0.19, 4.5, z); g.userData.wire = w;
+  scene.add(g); markers.push(g); return g;
+}
+
+// ---------- lights: the scheme comes from the mood ----------
+const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1); scene.add(hemi);
+function spot(pos, target, angle, penumbra, shadow) {
+  const l = new THREE.SpotLight(0xffffff, 1, 0, angle, penumbra, 0);
+  l.position.copy(pos); l.target.position.copy(target); scene.add(l, l.target);
+  if (shadow && !DONT) { l.castShadow = true; l.shadow.mapSize.set(2048, 2048); l.shadow.bias = -0.0006; l.shadow.normalBias = 0.02;
+    l.shadow.camera.near = 3; l.shadow.camera.far = 45; }
+  return l;
+}
+const key = spot(new THREE.Vector3(-5, 9, 12), new THREE.Vector3(-0.3, -0.4, -1), 0.5, 0.55, true);
+const fill = spot(new THREE.Vector3(6, 7, 11), new THREE.Vector3(0.5, 0, -1), 0.6, 0.7, false);
+const foot = spot(new THREE.Vector3(0, FLOOR + 0.15, 4.6), new THREE.Vector3(0, 1.2, -6), 1.0, 0.8, true);
+const pin = spot(new THREE.Vector3(1.2, 9, 8), new THREE.Vector3(1.9, -0.8, 0.2), 0.12, 0.4, false);
+
+// ---------- post: vignette toward the house colour, then sRGB output ----------
+const rt = new THREE.WebGLRenderTarget(1280, 720, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.addPass(new RenderPass(scene, camera));
+const vignette = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, amt: { value: 0.25 }, col: { value: new THREE.Color() } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float amt; uniform vec3 col; varying vec2 vUv;
+    void main() { vec4 c = texture2D(tDiffuse, vUv); vec2 d = (vUv - 0.5) * vec2(1.6, 1.0);
+      float v = smoothstep(0.35, 0.95, length(d)); gl_FragColor = vec4(mix(c.rgb, col, v * amt), c.a); }`,
+});
+composer.addPass(vignette);
+composer.addPass(new OutputPass());
+
+function applyMood() {
+  const P = C(), L = mood().light;
+  for (const [k, v] of Object.entries(P)) document.documentElement.style.setProperty('--' + k, v);
+  scene.background = new THREE.Color(P.house); houseMat.color.set(P.house);
+  for (const m of backMats) m.color.set(P.card);
+  for (const g of markers) { g.userData.a.material.color.set(P.accent); g.children[0].material.color.set(P.ink); }
+  hemi.color.set(P['light-fill']); hemi.groundColor.set(P.boards); hemi.intensity = L.hemi;
+  key.color.set(P['light-key']); key.intensity = L.key;
+  fill.color.set(P['light-fill']); fill.intensity = L.fill;
+  foot.color.set(P['light-foot']); foot.intensity = L.foot;
+  pin.color.set(P['light-key']); pin.intensity = L.pin; pin.visible = L.pin > 0;
+  vignette.uniforms.amt.value = L.vignette; vignette.uniforms.col.value.set(P.house);
+  needRender = true; kick();
+}
+
+// ---------- the interface: slips with torn edges, placed from the figures ----------
+const ref = new THREE.PerspectiveCamera(BASE_FOV, 16 / 9, 0.1, 100);
+ref.position.copy(HOME.pos); ref.lookAt(HOME.look); ref.updateMatrixWorld(); ref.updateProjectionMatrix();
+const toHud = (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(ref); return [(v.x + 1) / 2 * 1280, (1 - v.y) / 2 * 720]; };
+function tear(el, rnd) {
+  const w = el.offsetWidth, h = el.offsetHeight, pts = [], j = () => (rnd() * 2.4).toFixed(1);
+  for (let x = 0; x < w; x += 12) pts.push(`${x}px ${j()}px`);
+  for (let y = 0; y < h; y += 12) pts.push(`${w - j()}px ${y}px`);
+  for (let x = w; x > 0; x -= 12) pts.push(`${x}px ${h - j()}px`);
+  for (let y = h; y > 0; y -= 12) pts.push(`${j()}px ${y}px`);
+  el.style.clipPath = `polygon(${pts.join(',')})`;
+}
+function layoutHud() {
+  const place = (id, [x, y], ax = 0.5) => { const el = document.getElementById(id); el.style.left = Math.round(x - el.offsetWidth * ax) + 'px'; el.style.top = Math.round(y) + 'px'; };
+  // pillar slips centred on the pillars of the frame
+  const P = pieces.prosc, [lx] = toHud(-3.9 - 0.95, 0, 5), [rx] = toHud(3.9 + 0.95, 0, 5);
+  place('slipBasket', [lx, 150]); place('slipBill', [rx, 150]);
+  place('slipTalk', [640, 112]);
+  place('tagGirl', toHud(-1.2, FLOOR, 0.5).map((v, i) => v + (i ? 10 : 0)));
+  place('tagCart', toHud(-3.0, FLOOR, -1.3).map((v, i) => v + (i ? 8 : 0)));
+  place('wolfCard', toHud(1.9, FLOOR, 0.2).map((v, i) => v + (i ? 10 : 0)));
+  const rnd = mulberry32(5); for (const el of document.querySelectorAll('#hud .slip')) tear(el, rnd);
+}
+function showHud(on) {
+  document.getElementById('hud').classList.toggle('on', on);
+  if (placard) { placard.visible = !on; for (const w of placardWires) w.visible = !on; }
+  layoutHud();
+}
+
+// ---------- frames ----------
+function setupFrame(f) {
+  const hud = document.getElementById('hud');
+  if (f === 'character') {
+    hud.style.display = 'none';
+    wolf.visible = cart.visible = placard.visible = false; for (const w of placardWires) w.visible = false;
+    for (const g of markers) { g.visible = false; g.userData.wire.visible = false; }
+    girl.rotation.y = 0.32;
+    view = { pos: new THREE.Vector3(-0.6, -0.1, 5.6), look: new THREE.Vector3(-1.15, -0.55, 0.5), fov: 30 };
+  } else if (f === 'prop') {
+    hud.style.display = 'none';
+    girl.visible = wolf.visible = placard.visible = false; for (const w of placardWires) w.visible = false;
+    rigs.forEach(r => r.visible = false); markers[0].visible = false; markers[0].userData.wire.visible = false;
+    view = { pos: new THREE.Vector3(-2.2, -0.1, 4.2), look: new THREE.Vector3(-3.0, -0.75, -1.3), fov: 34 };
+  } else if (f === 'text-heavy') {
+    showHud(true);
+  } else if (f === 'dont') {
+    hud.style.display = 'none';
+  } else showHud(false);
+}
+
+// ---------- render loop ----------
+const parallax = new THREE.Vector2();
+function update(t) {
+  for (const g of markers) g.position.y = g.userData.baseY + Math.sin(t * Math.PI) * 0.04;
+  girl.position.y = FLOOR + Math.abs(Math.sin(t * 1.3)) * 0.015;
+  wolf.rotation.z = Math.sin(t * 0.9) * 0.008;
+  const k = document.getElementById('hud').classList.contains('on') ? 0 : 1;   // slips are placed from the home camera
+  camera.position.copy(view.pos).add(new THREE.Vector3(parallax.x * 0.25 * k, parallax.y * 0.12 * k, 0));
+  camera.lookAt(view.look);
+}
+const fixedT = 0.4;
+let frameCount = 0;
+function loop(ms) {
+  if (FRAME) {
+    update(fixedT); composer.render();
+    if (++frameCount < 10) requestAnimationFrame(loop); else document.title = 'ready';
+    return;
+  }
+  if (document.hidden) { running = false; return; }
+  if (needRender || ms - last >= 100) { update(ms / 1000); composer.render(); last = ms; needRender = false; }   // about 10 fps when idle
+  requestAnimationFrame(loop);
+}
+let built = false;
+function kick() { if (built && !FRAME && !running && !document.hidden) { running = true; requestAnimationFrame(loop); } }
+document.addEventListener('visibilitychange', kick);
+
+function resize() {
+  const w = FRAME ? 1280 : innerWidth, h = FRAME ? 720 : innerHeight, pr = FRAME ? 1 : Math.min(2, devicePixelRatio);
+  renderer.setPixelRatio(pr); renderer.setSize(w, h); composer.setPixelRatio(pr); composer.setSize(w, h);
+  const a = w / h;
+  camera.aspect = a;
+  camera.fov = a >= 16 / 9 ? view.fov : 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(view.fov / 2)) * (16 / 9) / a));
+  camera.updateProjectionMatrix();
+  const hud = document.getElementById('hud');
+  if (FRAME) hud.style.transform = '';
+  else { const k = Math.min(w / 1280, h / 720); hud.style.transform = `translate(${(w - 1280 * k) / 2}px, ${(h - 720 * k) / 2}px) scale(${k})`; }
+  needRender = true;
+}
+
+// ---------- interaction (outside frame mode) ----------
+if (!FRAME) {
+  addEventListener('pointermove', e => { parallax.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight * 2 - 1)); needRender = true; kick(); });
+  const sel = document.getElementById('mood');
+  for (const [k, m] of Object.entries(MOODS)) if (k !== 'dont') sel.add(new Option(m.label, k, false, k === moodName));
+  sel.onchange = () => { moodName = sel.value; applyMood(); };
+  document.getElementById('bHud').onclick = e => {
+    const on = !document.getElementById('hud').classList.contains('on'); showHud(on);
+    e.currentTarget.setAttribute('aria-pressed', on); needRender = true; kick();
+  };
+  addEventListener('resize', resize);
+}
+
+// ---------- start: build once every image has loaded ----------
+manager.onLoad = async () => {
+  build(); applyMood();
+  if (document.fonts) await document.fonts.ready;
+  if (FRAME) setupFrame(FRAME); else showHud(false);
+  resize(); built = true;
+  if (FRAME) requestAnimationFrame(loop); else kick();
+};
+</script>
+</body>
+</html>
