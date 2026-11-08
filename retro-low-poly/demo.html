@@ -5,10 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Retro low-poly demo</title>
 <style>
+  /* Bundled faces (SIL OFL), so the page reads the same everywhere: Fira Sans Bold and ExtraBold for
+     every word; Noto Sans Symbols 2 for the check mark, held to Fira's line height */
+  @font-face { font-family:"Fira Sans"; src:url(assets/fonts/FiraSans-Bold.woff) format("woff"); font-weight:700; }
+  @font-face { font-family:"Fira Sans"; src:url(assets/fonts/FiraSans-ExtraBold.woff) format("woff"); font-weight:800; }
+  @font-face { font-family:"Noto Sans Symbols 2"; src:url(assets/fonts/NotoSansSymbols2-Regular.woff) format("woff");
+    ascent-override:94%; descent-override:27%; line-gap-override:0%; }
   :root { --ink:#1C1824; --panel:#F4ECD8; --accent:#A23CFF; --fog:#DDEEF5;
           --signal-ok:#86D890; --signal-warn:#F2C24E; --signal-danger:#F27060; --signal-info:#86B8F2; }
   html, body { margin:0; height:100%; overflow:hidden; background:var(--fog); }
-  body { font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color:var(--ink); }
+  body { font-family: "Fira Sans", "Noto Sans Symbols 2", sans-serif; color:var(--ink); }
   canvas#c { display:block; position:absolute; left:0; top:0; image-rendering:pixelated; }
   /* frame mode: a fixed 1280x720 canvas pinned at the top-left, whatever the viewport */
   body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
@@ -138,12 +144,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// the bundled faces: start loading them first, while the assets load, and wait for them before a frame is drawn
+const FONTS = Promise.all([document.fonts.load('700 16px "Fira Sans"'), document.fonts.load('800 16px "Fira Sans"'),
+  document.fonts.load('16px "Noto Sans Symbols 2"', '✓')]);
+
 // ---------- assets: MaterialCraft textures (data URIs) and the Meshy cook (base64 GLB), see assets/README.md ----------
 const IMG = {};
 await Promise.all(Object.entries(window.TEXTURES).map(([k, src]) => new Promise((ok, bad) => {
   const im = new Image(); im.onload = () => { IMG[k] = im; ok(); }; im.onerror = bad; im.src = src; })));
 const glbBytes = Uint8Array.from(atob(window.MODELS.cook), c => c.charCodeAt(0)).buffer;
 const COOK = await new Promise((ok, bad) => new GLTFLoader().parse(glbBytes, '', ok, bad));
+await FONTS;
 
 // ---------- setup ----------
 const params = new URLSearchParams(location.search);

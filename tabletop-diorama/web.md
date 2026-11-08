@@ -134,7 +134,8 @@ Halve `amount` for close-ups.
 
 **Live text on cards and signs in the scene:** draw it into a canvas texture with the palette's
 `paper` and `ink`, and redraw it when the palette changes; see `label()` in `demo.html`. Text the
-player must read lives in HTML paper cards over the canvas.
+player must read lives in HTML paper cards over the canvas. The demo bundles its font (Gelasio) in
+`assets/fonts/` and awaits `document.fonts.load()` before the first canvas text; a game picks its own.
 
 **Accent ring:** `RingGeometry(1.1 r, 1.1 r + 0.04, 48)` in a `MeshBasicMaterial` of `accent`,
 `depthWrite: false`, polygon offset −2/−4, 0.02 above the surface it marks.

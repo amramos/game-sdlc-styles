@@ -1,21 +1,18 @@
 # Godot 4 port
 
 **Test-rendered** in Godot 4.7.1 (Compatibility). `frames/godot-key-scene.*` rebuilds
-`demo.html?frame=key-scene`. Against the web frame: mean difference 3.6 / 3.2 / 2.9 per 255 (R, G,
-B); 1.4% of pixels differ by more than 24, and nearly all of those are caption glyph edges.
+`demo.html?frame=key-scene`. Against the web frame: mean difference 3.4 / 2.8 / 2.9 per 255 (R, G,
+B); 1.2% of pixels differ by more than 24, and nearly all of those are caption glyph edges.
 Composition, camera, cast, props, signs, awnings, bunting, town, valley, sky, shadows, tilt-shift,
 grade and the three captions sit where the web frame has them. What still differs, and why:
 
-- **Caption text** (the worst tiles, about 22/255 averaged over a tile). FreeType draws the glyphs
-  thinner than Chrome's DirectWrite and a little differently. The boxes, line breaks and positions
-  match. The text is emboldened by 0.35 and moved down 2 px to close most of the gap.
+- **Caption text** (the worst tiles, about 19/255 averaged over a tile). Both draw the same bundled
+  Alegreya files, but FreeType draws the glyphs thinner than Chrome's DirectWrite and a little
+  differently. The boxes, line breaks and positions match. The names are emboldened by 0.2 and the
+  text moved up 1 px to close most of the gap.
 - **1 px edges** on tile grout, box edges and sprite outlines: different multisample patterns.
-- **Floor texels** look crisper than in the web frame. The port point-samples the value maps, as
-  the recipe asks. The web frames show them smoothly magnified (clearest in `character.jpg`),
-  probably because `anisotropy = 4` overrides `NearestFilter` on Chrome's Direct3D backend. Linear
-  filtering in Godot doesn't improve the match, so the port keeps nearest.
 
-<!-- matched-web-frame: 787db89164de -->
+<!-- matched-web-frame: 0beb17ff9b07 -->
 
 > **The `assets/` paths below load this entry's example art**, which is how the port was tested against the web demo. A game never ships it: load the game's own models, sprites and textures, made the same way, in their place.
 
@@ -42,20 +39,19 @@ Palette switching and the close-up camera aren't ported either.
   `mipmaps/generate = false`, and **`detect_3d/compress_to = Disabled`**. With the default, Godot
   switches a texture to VRAM compression the first time it sees it used in 3D, which smears pixel
   art. The shaders sample them `filter_nearest`.
-- **Value maps** (128² and 256² grey maps): `Lossless`, `mipmaps/generate = true`,
-  `detect_3d/compress_to = Disabled`, sampled `filter_nearest_mipmap_anisotropic, repeat_enable`.
-  Godot has no separate magnification and minification filters. This gives nearest texels up close
-  and mipmaps far away, which is what three.js' `NearestFilter` / `LinearMipmapLinearFilter` pair
-  does.
+- **Value maps** (128² and 256² grey maps): `Lossless`, `mipmaps/generate = false`,
+  `detect_3d/compress_to = Disabled`, sampled `filter_nearest, repeat_enable`: point-sampled at
+  every distance, so a surface keeps hard steps between its four values, as three.js'
+  `NearestFilter` for both filters with `generateMipmaps = false` does.
 - **Textures drawn in code** (the brushy grain, the painted sky) are `Image`s built at start-up and
   turned into `ImageTexture`s with mipmaps. The port's `sky_image()` repeats the demo's canvas
   painting step by step (gradient, halo round the key, 70 cloud strokes, two hill layers, fog below
   the horizon); a game paints its own backdrop to recipe.md's numbers, in code or with an image
   model, and passes it to `backdrop.gdshader` the same way.
-- **Font:** the demo uses the system's Palatino Linotype (Book Antiqua, Palatino, Georgia as
-  fallbacks), so the port uses a `SystemFont` with the same names. Bold is a 600 weight with OpenType
-  small caps (`smcp`) and 1 px letter spacing; the description line is italic. To ship it, bundle a
-  licensed copy or a free Palatino-style face (TeX Gyre Pagella, for example).
+- **Font:** the demo bundles Alegreya (OFL) in `assets/fonts/`: a variable upright file (weights
+  400–700) and an italic. The port loads the same `.woff` files from `res://fonts/` as `FontFile`s.
+  Names are weight 600 (`variation_opentype`) with OpenType small caps (`smcp`) and 1 px letter
+  spacing; the description line is the italic.
 
 ## Putting it together
 
@@ -100,25 +96,15 @@ three.js' `IcosahedronGeometry` for foliage and goods; a game can use a flat-sha
 
 ## Compatibility traps (4.7.1)
 
-These come on top of the ones every 3D entry hits: ambient plus a shadowed light, Environment fog
-in both passes, `source_color` in `light()`. They're all handled in the code below.
+From `godot-compatibility.md` (copied beside this file): **3, 8, 9** as every 3D entry, and as they show here:
 
-1. **Unshaded spatial shaders run in sRGB.** `source_color` uniforms and textures arrive
-   un-linearised, `ALBEDO` is written to the screen as it is, and alpha blending happens on sRGB
-   values. A flat colour therefore looks right, but any maths (lighting the valley, mixing fog,
-   tinting a sprite) happens in the wrong space, and a 45% dark blob comes out much darker. Forward+
-   does all of this in linear. Fix: `space.gdshaderinc` (`in_linear()`, `out_albedo()`), plus
-   `out_alpha()` for dark overlays: `1 - (1 - a)^(1/2.2)` blends in sRGB about as dark as `a` does in
-   linear.
-2. **In lit shaders, a colour that `fragment()` reads must be `source_color`.** A plain `vec3` set
-   from a `Vector3` of linear values came out darker by its own value, as if decoded a second time.
-   Colours read in `light()` stay plain `vec3`s with linear values, as before. In practice: albedo
-   and fog in `fragment()` are `source_color`; key, rim, fill and fog in `light()` are linear `vec3`s.
-3. **Faint additive blending disappears.** Adding the key colour at 2.5% (the light shafts) does
-   nothing in Compatibility, and larger amounts overshoot. Fix: the shafts mix toward white at
-   2.56 × their opacity in Compatibility (`shaft.gdshader`) and add in Forward+. The accent ring, a
-   strong addition, is scaled by 0.7, the slope of the sRGB curve at mid-tones.
-4. **Neutral Environment adjustments or glow don't help.** They don't switch Compatibility to a
+1. **Unshaded spatial shaders run in sRGB** (trap 1): lighting the valley, mixing fog and tinting
+   sprites happen in the wrong space, and a 45% dark blob comes out much darker. Fix:
+   `space.gdshaderinc` (`in_linear()`, `out_albedo()`), plus `out_alpha()` for dark overlays:
+   `1 - (1 - a)^(1/2.2)` blends in sRGB about as dark as `a` does in linear.
+2. **Additive light** (trap 11): the shafts mix toward white at 2.56 × their opacity in
+   Compatibility (`shaft.gdshader`) and add in Forward+; the accent ring is scaled by 0.7.
+3. **Neutral Environment adjustments or glow don't help.** They don't switch Compatibility to a
    linear 3D buffer for these cases.
 
 Engine-independent points:
@@ -129,7 +115,7 @@ Engine-independent points:
   (`shadow_half`); set it to cover your set plus 30%.
 - **Caption text:** the port sizes captions like CSS (shrink to the unwrapped text width, capped at
   240 px) and nudges FreeType toward Chrome (`EMBOLDEN`, `BASELINE_SHIFT`). Glyph rasterisation
-  can't be matched exactly; expect about 20/255 on text pixels against the web.
+  can't be matched exactly; expect about 19/255 on text pixels against the web.
 
 ## Shaders
 
@@ -196,7 +182,7 @@ specular_disabled;`), `toon_double.gdshader` (adds `cull_disabled`, for awnings 
 uniform vec4 albedo : source_color = vec4(1.0);   // read in fragment(): source_color
 uniform int map_kind = 0;   // 0 brushy grain (UV 0-1 per face), 1 value map (world UVs, tiling), 2 pixel art
 uniform sampler2D grain_map : source_color, filter_linear_mipmap, repeat_disable;
-uniform sampler2D value_map : source_color, filter_nearest_mipmap_anisotropic, repeat_enable;
+uniform sampler2D value_map : source_color, filter_nearest, repeat_enable;
 uniform sampler2D pixel_map : source_color, filter_nearest_mipmap, repeat_disable;
 uniform bool grain_corner = false;   // flags: three.js draws them without UVs, so every pixel reads one texel
 
@@ -844,23 +830,24 @@ func grade_tint() -> Vector3:
 
 Captions. The fonts: names in 17 px bold small capitals with 1 px letter spacing, the status line
 in 16 px italic, both drawn on a `Control` in their own `CanvasLayer` above the post (`EMBOLDEN` was
-tuned to match Chrome's heavier light-on-dark text; keep it if your captions look thin):
+tuned to match Chrome's heavier light-on-dark names; keep it if your captions look thin):
 
 ```gdscript
 var f_name: FontVariation
 var f_line: FontVariation
-const EMBOLDEN := 0.35        # Chrome on Windows draws this light-on-dark text heavier than FreeType
+const EMBOLDEN := 0.2         # Chrome on Windows draws the light-on-dark names a little heavier than FreeType
+const BASELINE_SHIFT := -1.0  # Chrome places the baseline 1 px higher than the hhea-centred line box
 var cap_layer: Control
 
 func build_captions() -> void:
-	var names := PackedStringArray(["Palatino Linotype", "Book Antiqua", "Palatino", "Georgia", "serif"])
-	var bold := SystemFont.new(); bold.font_names = names; bold.font_weight = 600
-	f_name = FontVariation.new(); f_name.base_font = bold
-	f_name.opentype_features = {TextServerManager.get_primary_interface().name_to_tag("smcp"): 1}   # small caps
-	f_name.spacing_glyph = 1                                                                         # .06em
-	var it := SystemFont.new(); it.font_names = names; it.font_italic = true
-	f_line = FontVariation.new(); f_line.base_font = it; f_line.variation_embolden = EMBOLDEN
+	# the font files the web demo bundles (assets/fonts): Alegreya, variable upright and italic
+	var ts := TextServerManager.get_primary_interface()
+	f_name = FontVariation.new(); f_name.base_font = load("res://fonts/Alegreya-Variable.woff")
+	f_name.variation_opentype = {ts.name_to_tag("wght"): 600}                     # font-weight 600
+	f_name.opentype_features = {ts.name_to_tag("smcp"): 1}                       # small caps
+	f_name.spacing_glyph = 1                                                     # .06em
 	f_name.variation_embolden = EMBOLDEN
+	f_line = FontVariation.new(); f_line.base_font = load("res://fonts/Alegreya-Italic.woff")
 	var layer := CanvasLayer.new(); layer.layer = 2; add_child(layer)
 	cap_layer = Control.new(); cap_layer.set_anchors_preset(Control.PRESET_FULL_RECT); cap_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(cap_layer)

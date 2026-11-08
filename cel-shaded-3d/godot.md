@@ -23,28 +23,18 @@ post-processing.
 
 ## What Compatibility needs
 
-Measured against Forward+ in 4.7.1. Each one changed the frame visibly; the code below avoids them.
+Measured against Forward+ in 4.7.1; each changed the frame visibly. The code below handles these
+traps from `godot-compatibility.md` (copied beside this file):
 
-1. An **Environment ambient colour plus a shadow-casting directional light** brightens every lit
-   face in Compatibility, even with `StandardMaterial3D`. The flat ambient lives in the toon
-   shader's `light()`, and the Environment's ambient is black.
-2. **`source_color` uniforms read inside `light()` are not linearised** in Compatibility, while
-   Forward+ linearises a `Color` passed to a plain `vec3`. Colours used in `light()` are plain
-   `vec3` uniforms holding linear values, set from GDScript as a `Vector3` (`lin3()` below).
-3. **Environment fog is applied in both of Compatibility's passes**, so distant objects wash out.
-   Fog is mixed in `light()`, and the Environment's fog stays off.
-4. **Sky shaders run in sRGB in Compatibility**, so colours blend in sRGB there and in linear in
-   Forward+. The sky shader branches on `CURRENT_RENDERER`.
-5. **Albedo must come from a `source_color` uniform.** With `ALBEDO` set from a plain `vec3`/`vec4`
-   uniform (or a literal), the shadow-lit model came out about albedo squared in Compatibility (a
-   red at 153, 8, 3 instead of 188, 60, 52) while Forward+ was right. The slot colours are
-   therefore a `source_color` array, filled with sRGB `Color`s.
-6. **Imported textures that hold data** (the slot map) must not be VRAM-compressed: set the GLB's
-   embedded image handling to *Embed as Uncompressed* and sample with `filter_nearest`, no
-   `source_color`.
-7. **Vertex colours are linearised on their way into `fragment()`** in Compatibility. The outline
-   reads its smoothed normal from the vertex colour in `vertex()` only, where it is raw in both
-   renderers.
+- **8, 9:** the flat ambient and the fog live in the toon shader's `light()`; the Environment's
+  ambient is black and its fog off.
+- **3:** colours used in `light()` are plain `vec3` uniforms of linear values, set with `lin3()`.
+  Albedo comes from a `source_color` array of sRGB `Color`s (the slot colours); from a plain
+  uniform the shadow-lit model came out about albedo squared (153, 8, 3 instead of 188, 60, 52).
+- **6:** the sky shader branches on `CURRENT_RENDERER`.
+- **16:** the slot map is data: the GLB's images are *Embed as Uncompressed*, sampled
+  `filter_nearest`, no `source_color`.
+- **5:** the outline reads its smoothed normal from the vertex colour in `vertex()` only.
 
 ## Shaders
 

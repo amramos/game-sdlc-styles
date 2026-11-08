@@ -14,3 +14,4 @@ The example art isn't duplicated here. Before opening, fill these folders from t
 | Folder | Files |
 |---|---|
 | `img/` | backcloth.jpg, cart.png, drape.png, floor.jpg, girl.png, proscenium.png … |
+| `fonts/` | the `.woff` files in `assets/fonts/`, copied as they are |

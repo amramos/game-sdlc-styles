@@ -83,6 +83,12 @@ func label(text: String, variation: String) -> Label:
 	l.theme_type_variation = variation
 	if variation.ends_with("Caption") or variation in ["Who", "ChipWord"]:
 		l.uppercase = true
+	if variation in ["Caption", "Who"]:
+		# CSS letter-spacing (0.06 em) is fractional and also trails the last letter; the theme's
+		# whole-pixel tracking falls 2 px short on a short caption, so size the label like the browser
+		var sz := theme.get_font_size("font_size", variation)
+		var w := InkTheme.display_base.get_string_size(text.to_upper(), 0, -1, sz).x + text.length() * 0.06 * sz
+		l.custom_minimum_size.x = ceilf(w)
 	return l
 
 ## Tilted labels live in a plain slot: containers reset rotation, the slot doesn't.
@@ -201,6 +207,7 @@ func _build_options(ui: Control) -> HBoxContainer:
 		card.custom_minimum_size = Vector2(190, 118)
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 0)
+		col.alignment = BoxContainer.ALIGNMENT_CENTER   # the card is a <button>: it centres short content
 		card.add_child(col)
 		var cap := label(o[0], "CardCaption")
 		cap.modulate.a = 0.9
@@ -213,9 +220,8 @@ func _build_options(ui: Control) -> HBoxContainer:
 		col.add_child(_gap(6))
 		var num := PriceLabel.new()
 		num.number = o[2]
-		num.line_height = 39.0                    # the number's line box, with the body face's strut
-		                                          # (containers lay out in whole px: 2 x 23 + 39 = the web's 45.6 + 39.4)
-		num.baseline_shift = -1.0
+		num.line_height = 36.0                    # the number's line box: 40 px at line-height 0.9; the body
+		                                          # face's strut fits inside it (2 x 23 + 36 = the web's 45.6 + 36)
 		num.color = ink
 		col.add_child(num)
 		slot.add_child(card)

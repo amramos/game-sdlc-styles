@@ -70,3 +70,11 @@ schemes keep working. Normal maps downscaled to 512 px.
 ## Embedded for file://
 
 The images the page draws with WebGL are packed into `images.js` (the catalog script `embed_images.py pack`), because Chrome blocks textures loaded from neighbouring files when the page is opened from the file. To edit one, run `embed_images.py unpack` on this folder, change the file, then `pack` again.
+
+## Fonts (`fonts/`)
+
+Subset to Latin (plus the symbols the page draws) and saved as WOFF with fontTools, from the google/fonts repository; each licence sits beside its font.
+
+| File | Face | Licence | Size |
+|---|---|---|---|
+| `Gelasio-Variable.woff`, `Gelasio-VariableItalic.woff` | Gelasio, upright and italic, weights 400–700 (variable) | SIL OFL 1.1, `GELASIO-OFL.txt` | 45 KB, 51 KB |

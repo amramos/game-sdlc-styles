@@ -24,9 +24,11 @@ func _draw() -> void:
 		draw_polyline(poly, paper, 1.0, true)             # antialiased cut edge
 	_stroke_rect(Rect2(22, 20, 576, 120), 3.0)
 	_stroke_rect(Rect2(30, 28, 560, 104), 1.2)
-	# canvas textAlign center, textBaseline middle at (310, 84)
+	# canvas textAlign center, textBaseline middle at (310, 84): Chrome's "middle" is the centre of
+	# the em box, the font's ascent and descent scaled so together they make one em
 	var size := 72
-	var base := 84.0 + (font.get_ascent(size) - font.get_descent(size)) * 0.5
+	var a := font.get_ascent(size); var d := font.get_descent(size)
+	var base := 84.0 + size * (a - d) / (a + d) * 0.5
 	draw_string(font, Vector2(310 - 400, base), title, HORIZONTAL_ALIGNMENT_CENTER, 800, size, ink)
 
 func _stroke_rect(r: Rect2, w: float) -> void:

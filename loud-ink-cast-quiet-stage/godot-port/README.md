@@ -14,3 +14,4 @@ The example art isn't duplicated here. Before opening, fill these folders from t
 | Folder | Files |
 |---|---|
 | `cast/` | customer-haggling.png, stage-stall-night.png |
+| `fonts/` | the `.woff` files in `assets/fonts/`, copied as they are |

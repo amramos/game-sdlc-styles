@@ -310,18 +310,17 @@ func _ready() -> void:
 	# interface: the basket slip pinned over the left pillar
 	var hud := CanvasLayer.new(); hud.layer = 2; add_child(hud)
 	var slip := Slip.new()
-	slip.regular = pala(400, false)
-	slip.bold_onum = pala(700, false, {"onum": 1})
-	slip.bold_smcp = pala(700, false, {"smcp": 1})
+	slip.regular = garamond(400, false)
+	slip.bold_onum = garamond(700, false, {"onum": 1})
+	slip.bold_smcp = garamond(700, false, {"smcp": 1})
 	var lx := camera.unproject_position(Vector3(-3.9 - 0.95, 0, 5)).x
 	slip.position = Vector2(roundf(lx - Slip.W * 0.5), 150)
 	hud.add_child(slip)
 
-func pala(weight: int, italic: bool, features := {}) -> Font:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(["Palatino Linotype", "Palatino", "Book Antiqua", "TeX Gyre Pagella", "serif"])
-	f.font_weight = weight
-	f.font_italic = italic
+## The demo's own font files (assets/fonts/ on the web): EB Garamond in the weights the page uses.
+func garamond(weight: int, italic: bool, features := {}) -> Font:
+	var style := ("Bold" if weight >= 700 else "") + ("Italic" if italic else "")
+	var f: FontFile = load("res://fonts/EBGaramond-%s.woff" % (style if style else "Regular"))
 	if features.is_empty(): return f
 	var v := FontVariation.new()
 	v.base_font = f
@@ -338,7 +337,7 @@ func paint_placard(mat: ShaderMaterial) -> void:
 	sv.transparent_bg = true
 	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var p := Placard.new()
-	p.font = pala(700, true)
+	p.font = garamond(700, true)
 	sv.add_child(p)
 	add_child(sv)
 	await RenderingServer.frame_post_draw

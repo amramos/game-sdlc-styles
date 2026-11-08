@@ -587,21 +587,21 @@ const MAX_W := 240.0
 const PAD := Vector4(9, 3, 9, 4)   # left, top, right, bottom
 var f_name: FontVariation
 var f_line: FontVariation
-const EMBOLDEN := 0.35        # Chrome on Windows draws this light-on-dark text heavier than FreeType
-const BASELINE_SHIFT := 2.0   # Chrome places the baseline 2 px lower than the hhea-centred line box
+const EMBOLDEN := 0.2         # Chrome on Windows draws the light-on-dark names a little heavier than FreeType
+const BASELINE_SHIFT := -1.0  # Chrome places the baseline 1 px higher than the hhea-centred line box
 var cap_layer: Control
 var placed_caps := []
 var selected := "shopper"
 
 func build_captions() -> void:
-	var names := PackedStringArray(["Palatino Linotype", "Book Antiqua", "Palatino", "Georgia", "serif"])
-	var bold := SystemFont.new(); bold.font_names = names; bold.font_weight = 600
-	f_name = FontVariation.new(); f_name.base_font = bold
-	f_name.opentype_features = {TextServerManager.get_primary_interface().name_to_tag("smcp"): 1}   # small caps
-	f_name.spacing_glyph = 1                                                                         # .06em
-	var it := SystemFont.new(); it.font_names = names; it.font_italic = true
-	f_line = FontVariation.new(); f_line.base_font = it; f_line.variation_embolden = EMBOLDEN
+	# the font files the web demo bundles (assets/fonts): Alegreya, variable upright and italic
+	var ts := TextServerManager.get_primary_interface()
+	f_name = FontVariation.new(); f_name.base_font = load("res://fonts/Alegreya-Variable.woff")
+	f_name.variation_opentype = {ts.name_to_tag("wght"): 600}                     # font-weight 600
+	f_name.opentype_features = {ts.name_to_tag("smcp"): 1}                       # small caps
+	f_name.spacing_glyph = 1                                                     # .06em
 	f_name.variation_embolden = EMBOLDEN
+	f_line = FontVariation.new(); f_line.base_font = load("res://fonts/Alegreya-Italic.woff")
 	var layer := CanvasLayer.new(); layer.layer = 2; add_child(layer)
 	cap_layer = Control.new(); cap_layer.set_anchors_preset(Control.PRESET_FULL_RECT); cap_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(cap_layer)

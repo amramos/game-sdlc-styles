@@ -5,10 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Neon vector glow demo</title>
 <style>
+  @font-face { font-family:"Open Sans"; src:url(assets/fonts/OpenSans-Regular.woff) format("woff"); font-weight:400; }
+  @font-face { font-family:"Open Sans"; src:url(assets/fonts/OpenSans-SemiBold.woff) format("woff"); font-weight:600; }
+  @font-face { font-family:"Open Sans"; src:url(assets/fonts/OpenSans-Bold.woff) format("woff"); font-weight:700; }
+  @font-face { font-family:"Open Sans"; src:url(assets/fonts/OpenSans-ExtraBold.woff) format("woff"); font-weight:800; }
+  @font-face { font-family:"Cascadia Mono"; src:url(assets/fonts/CascadiaMono-Regular.woff) format("woff"); font-weight:400; }
+  @font-face { font-family:"Cascadia Mono"; src:url(assets/fonts/CascadiaMono-Bold.woff) format("woff"); font-weight:700; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   canvas { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
   #ui { position: fixed; left: 8px; bottom: 8px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px;
-        font: 13px/1.3 ui-monospace, Consolas, monospace; color: #cfd8e8; }
+        font: 13px/1.3 "Cascadia Mono", monospace; color: #cfd8e8; }
   #ui button { font: inherit; background: #0b0f1a; color: #cfd8e8; border: 1px solid #3a4560; padding: 4px 8px; cursor: pointer; }
   #ui button[aria-pressed="true"] { border-color: #e6eeff; background: #1a2238; }
   body.frame #ui { display: none; }
@@ -434,8 +440,8 @@ function drawWorld(S, dont = false) {
 // bloom off the numbers. Words only where a number alone would be ambiguous.
 // Smallest text 16 px at 720p (24 px at 1080p). Numbers monospace, tabular.
 // ---------------------------------------------------------------------------
-const F_BODY = '"Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
-const F_NUM = 'ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
+const F_BODY = '"Open Sans", sans-serif';
+const F_NUM = '"Cascadia Mono", monospace';
 function text(s, x, y, size, opts = {}) {
   ctx.font = `${opts.weight || 600} ${size}px ${opts.mono ? F_NUM : F_BODY}`;
   ctx.fillStyle = opts.col || P["hud-ink"];
@@ -862,6 +868,10 @@ function buildUi() {
 // Entry.
 // ---------------------------------------------------------------------------
 const FRAMES = { "key-scene": frameKey, character: frameCharacter, prop: frameProp, "text-heavy": frameText, dont: frameDont };
+// the bundled faces, loaded before the first word is drawn on the canvas
+const FONTS = ['400 16px "Open Sans"', '600 16px "Open Sans"', '700 16px "Open Sans"', '800 16px "Open Sans"',
+  '400 16px "Cascadia Mono"', '700 16px "Cascadia Mono"'];
+(document.fonts ? Promise.all(FONTS.map(f => document.fonts.load(f))).catch(() => {}) : Promise.resolve()).then(() => {
 if (FRAME && FRAMES[FRAME]) {
   document.body.classList.add("frame");
   ctx.setTransform(K, 0, 0, K, 0, 0);
@@ -887,6 +897,7 @@ if (FRAME && FRAMES[FRAME]) {
   last = performance.now();
   schedule();
 }
+});
 </script>
 </body>
 </html>

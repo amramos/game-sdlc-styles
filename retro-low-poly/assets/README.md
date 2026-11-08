@@ -54,3 +54,12 @@ the function graphs.
    UVs, per-vertex light, fog), the texture is sampled raw (`colorSpace = NoColorSpace`; an sRGB
    decode darkens and over-saturates it, turning skin red) and nearest-filtered; scaled to 1.95 m
    to the top of the cap, feet on the floor.
+
+## Fonts (`fonts/`)
+
+Subset to Latin (plus the symbols the page draws) and saved as WOFF with fontTools, from the google/fonts repository; each licence sits beside its font.
+
+| File | Face | Licence | Size |
+|---|---|---|---|
+| `FiraSans-Bold.woff`, `FiraSans-ExtraBold.woff` | Fira Sans 700 and 800, every word of the interface | SIL OFL 1.1, `FIRASANS-OFL.txt` | 35 KB each |
+| `NotoSansSymbols2-Regular.woff` | Noto Sans Symbols 2: ▲ ▼ ◆ ● ▶ ✓ only | SIL OFL 1.1, `NOTOSANSSYMBOLS2-OFL.txt` | 1 KB |

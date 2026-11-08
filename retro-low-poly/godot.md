@@ -569,15 +569,14 @@ func make(tex_name: String, source: Image = null) -> ImageTexture:
 
 ## Compatibility traps
 
-- **Unshaded `ALBEDO` reaches a `SubViewport` without the sRGB encode in Compatibility**, while
-  Forward+ encodes it. Linearising in the shader (as the draft of this page did) made the
-  Compatibility frame far too dark (mean difference 56/255). The shader writes gamma-space colour as
-  it is in Compatibility and linearises only for the other renderers (`TO_OUTPUT`).
+- **Unshaded output** (`godot-compatibility.md` (copied beside this file), trap 1): the shader writes gamma-space colour as it is in
+  Compatibility and linearises only for the other renderers (`TO_OUTPUT`). Linearising in both made
+  the Compatibility frame far too dark (mean difference 56/255).
 - **Dither rows:** canvas `UV` runs top-down; count Bayer rows from the bottom to match GL.
 - **Winding:** Godot's front faces are clockwise and three.js's counter-clockwise; `to_mesh()`
   reverses every triangle, and keeps them as they are for the sky dome, which is seen from inside.
 - **Texture rows:** three.js's canvas textures are flipped; flip each `Image` once after drawing.
 - **Rounding:** Compatibility's canvas output rounds a 5-bit level such as 20/31 (164.5/255) up to
   165 where the browser writes 164; harmless, and the source of most ±1 differences.
-- No Environment fog, ambient, glow or tone mapping is used (the shader does light and fog), so the
-  ambient-with-shadowed-light and fog-in-both-passes traps don't arise here.
+- No Environment fog, ambient, glow or tone mapping is used (the shader does light and fog), so
+  traps 8 and 9 don't arise.

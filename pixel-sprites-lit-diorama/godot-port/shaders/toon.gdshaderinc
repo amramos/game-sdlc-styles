@@ -7,7 +7,7 @@
 uniform vec4 albedo : source_color = vec4(1.0);   // read in fragment(): source_color
 uniform int map_kind = 0;   // 0 brushy grain (UV 0-1 per face), 1 value map (world UVs, tiling), 2 pixel art
 uniform sampler2D grain_map : source_color, filter_linear_mipmap, repeat_disable;
-uniform sampler2D value_map : source_color, filter_nearest_mipmap_anisotropic, repeat_enable;
+uniform sampler2D value_map : source_color, filter_nearest, repeat_enable;
 uniform sampler2D pixel_map : source_color, filter_nearest_mipmap, repeat_disable;
 uniform bool grain_corner = false;   // flags: three.js draws them without UVs, so every pixel reads one texel
 

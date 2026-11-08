@@ -18,7 +18,7 @@ must be PNG: JPEG smears pixel edges and adds off-palette colours). Each page se
 | `prop.png` | `demo.html?frame=prop` | 160×90 at ×8: the beast beside the goods it carries (crates, lantern, sack, pot, cloth rolls, fruit, jar); the pack bar with the 8 item icons, the focused slot in the accent, and the purse |
 | `text-heavy.png` | `demo.html?frame=text-heavy` | the trade screen at worst case over the dithered scene: 8 goods with the longest name, quantities, prices, every signal chip, item detail, four buttons with focus, purse and load meter, a 3-line dialogue with her portrait and name tab |
 | `godot-key-scene.png` | (Godot test) | the key scene rebuilt in Godot 4.7.1 (Compatibility) by the code in `../godot.md`, from the same sprite PNGs and draw order: the 320×180 viewport captured and scaled ×4 nearest; 0 pixels differ from `key-scene.png` |
-| `dont.png` | `demo.html?frame=dont` | the key scene breaking the rules: non-integer ×4.27 scale with smoothing, off-palette gradient glow, the beast at double pixel size, a rotated sub-pixel sprite, soft drop shadow, small anti-aliased system text |
+| `dont.png` | `demo.html?frame=dont` | the key scene breaking the rules: non-integer ×4.27 scale with smoothing, off-palette gradient glow, the beast at double pixel size, a rotated sub-pixel sprite, soft drop shadow, small anti-aliased text (the pixel font at sizes off its grid, at sub-pixel positions) |
 
 Optional palette swaps for the "roles, not hexes" claim: add `&palette=dusk` or `&palette=oasis`
 to the key-scene URL (`key-scene-dusk.png`, `key-scene-oasis.png`).

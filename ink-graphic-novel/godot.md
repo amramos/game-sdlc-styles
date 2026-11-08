@@ -1,17 +1,17 @@
 # Godot 4 snippets
 
-<!-- matched-web-frame: 498128250f34 -->
+<!-- matched-web-frame: 539def13e82c -->
 
 **Test-rendered** in Godot 4.7.1 (Compatibility). `frames/godot-key-scene.jpg` rebuilds
 `demo.html?frame=key-scene` from `Control` and `Node2D` scenes, the entry's own generated images and
-the code on this page. Measured against the web frame: mean difference 3.3 / 2.6 / 4.0 per 255
-(R/G/B) for the lossless render (2.0 / 1.9 / 2.0 for the saved JPEG); 16% of pixels differ by more
-than 8 and 1.9% by more than 24. Composition, panels, art placement, snow, captions, balloon, sound
-word, question, icons, slips, note, palette and paper grain are the same. What is left is
-rasterisation: the browser's text is a little darker and crisper than Godot's greyscale glyphs (up
-to about 11/255 on lettered tiles), the sound word's outline is FreeType's stroke rather than the
-canvas `strokeText` (13/255 on that tile), edge resampling on the art (about 3/255), and the web
-frame's JPEG noise. **Forward+** renders the same frame (0.3 / 0.2 / 0.2 per 255 from the
+the code on this page. Measured against the web frame: mean difference 3.1 / 2.4 / 3.8 per 255
+(R/G/B) for the lossless render (1.7 / 1.6 / 1.7 for the saved JPEG); 15% of pixels differ by more
+than 8 and 1.5% by more than 24. Composition, panels, art placement, snow, captions, balloon, sound
+word, question, icons, slips, note, palette and paper grain are the same, and both draw the same
+bundled font files. What is left is rasterisation: the browser's text is a little darker and
+crisper than Godot's greyscale glyphs (up to about 13/255 on lettered tiles), the sound word's
+outline is FreeType's stroke rather than the canvas `strokeText` (13/255 on that tile), edge
+resampling on the art (about 3/255), and the web frame's JPEG noise. **Forward+** renders the same frame (0.3 / 0.2 / 0.2 per 255 from the
 Compatibility render) with the same code.
 
 The whole project that rendered the frame, including the scene that rebuilds the web demo exactly,
@@ -64,12 +64,11 @@ browser's `drawImage`, about twice the difference on every figure), so leave mip
 grain must repeat: every node that draws paper sets `texture_repeat = ENABLED` (the scripts do it in
 `_ready()`), and the page's `Grain` node sets it in the scene.
 
-**Fonts.** The port uses `SystemFont`s with fallback lists (lettering: Comic Neue, Comic Sans MS, …,
-bold for captions and slips, regular for the note; titles: IM Fell English SC, Georgia, …, bold).
-For a shipped game, bundle the chosen free faces (both of these are OFL) as `FontFile`s, and keep
-`hinting = None`, greyscale antialiasing and quarter-pixel subpixel positioning. The title face's
-small capitals are its own OpenType `smcp` glyphs (`FontVariation` below); synthesised small caps
-are narrower and lighter.
+**Fonts.** The port loads the same font files the web demo bundles (`assets/fonts/`, all OFL) as
+`FontFile`s from `res://fonts/`: Comic Neue Bold for captions and slips, Comic Neue Regular for the
+note, Alegreya Bold for titles. Keep `hinting = None`, greyscale antialiasing and quarter-pixel
+subpixel positioning (`_face()` below). The title face's small capitals are its own OpenType `smcp`
+glyphs (`FontVariation` below); synthesised small caps are narrower and lighter.
 
 ## The paper grain and its multiply
 
@@ -105,18 +104,18 @@ const ROLE := {
 }
 const GRAIN: Texture2D = preload("res://art/paper-grain.png")
 const GRAIN_TILE := 512.0
-## Chrome places the serif title face's em box about 1 px higher than the normalised ascent below
-## gives (measured against the web frame; the lettering face needs no nudge).
-const TITLE_TOP_NUDGE := -1.0
+## Chrome places each face's em box a little lower than the normalised ascent below gives
+## (measured against the web frame, in em): the lettering by 0.04, the title by 0.02.
+const LET_TOP_NUDGE := 0.04
+const TIT_TOP_NUDGE := 0.02
 
-static var LET := _sys(["Comic Neue", "Comic Sans MS", "Chalkboard SE", "Segoe Print"], 700)
-static var LET_400 := _sys(["Comic Neue", "Comic Sans MS", "Chalkboard SE", "Segoe Print"], 400)
-static var TIT := _small_caps(_sys(["IM Fell English SC", "Georgia", "Times New Roman"], 700))
+static var LET := _face("res://fonts/ComicNeue-Bold.woff")
+static var LET_400 := _face("res://fonts/ComicNeue-Regular.woff")
+static var TIT := _small_caps(_face("res://fonts/Alegreya-Bold.woff"))
 
-static func _sys(names: Array, weight: int) -> SystemFont:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(names)
-	f.font_weight = weight
+## The same font files the web demo bundles, drawn like the browser draws them.
+static func _face(path: String) -> FontFile:
+	var f: FontFile = load(path)
 	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	f.hinting = TextServer.HINTING_NONE
 	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_ONE_QUARTER
@@ -349,7 +348,7 @@ static func text_w(text: String, fs: int, kind := "let") -> float:
 static func top_offset(fs: int, kind := "let") -> float:
 	var f := font_for(kind)
 	var a := f.get_ascent(fs); var d := f.get_descent(fs)
-	return fs * a / (a + d) + (TITLE_TOP_NUDGE if kind == "tit" else 0.0)
+	return fs * (a / (a + d) + (TIT_TOP_NUDGE if kind == "tit" else LET_TOP_NUDGE))
 
 ## Draws text with its em box top at y (canvas textBaseline = 'top').
 static func text_top(ci: CanvasItem, x: float, y: float, text: String, fs: int, col: Color, kind := "let") -> void:
@@ -800,23 +799,23 @@ func _draw() -> void:
 
 ## What Godot needed (measured in 4.7.1)
 
-1. **Compatibility ignores 2D MSAA.** `msaa_2d` smooths polygons in Forward+ but leaves every
-   `draw_colored_polygon()` edge stair-stepped in Compatibility, so each brush stroke, slip edge and
-   icon came out jagged. `Ink.fill()` and `Ink.band()` antialias by hand: the shape shrunk by half a
-   pixel, ringed by a one-pixel feather from the colour to transparent. Stroke segments feather
-   only their long sides, or the joints show faint beads. Dabs use the same fill rather than
-   `draw_circle(..., antialiased = true)`, so a dab and the segments beside it get the same edge.
-2. **`Font.get_string_size()` rounds the width up to a whole pixel** (so does `TextLine`), while
-   the glyphs are drawn at fractional advances, so layouts that chain measured widths drift (a
-   value, its unit, the next icon). `Ink.text_w()` sums the shaped glyph advances from the
-   `TextServer`.
-3. **Text placed by its em box top** (canvas `textBaseline = 'top'`) is the ascent normalised to one
-   em: `fs × ascent / (ascent + descent)`. The serif title face sat 1 px low against the browser
-   and takes a −1 px nudge.
-4. **`draw_string_outline()`'s `size`** grows each glyph edge by size/4 px, while a canvas stroke of
+From `godot-compatibility.md` (copied beside this file):
+
+- **18 (no 2D MSAA):** `Ink.fill()` and `Ink.band()` feather by hand. Stroke segments feather only
+  their long sides, or the joints show faint beads; dabs use the same fill rather than
+  `draw_circle(..., antialiased = true)`, so a dab and the segments beside it get the same edge.
+- **24 (rounded widths):** `Ink.text_w()` sums the shaped glyph advances, so a value, its unit and
+  the next icon don't drift.
+- **22 (failed triangulation):** the tapered ends of a stroke and the fibres of a torn edge.
+  `Ink.fill()` falls back to the true shape when the shrunk one won't triangulate and skips
+  feather quads that fold over.
+
+Particular to this look:
+
+1. **Text placed by its em box top** (canvas `textBaseline = 'top'`) is the ascent normalised to one
+   em: `fs × ascent / (ascent + descent)`, plus a small per-face nudge against the browser
+   (lettering 0.04 em, titles 0.02 em).
+2. **`draw_string_outline()`'s `size`** grows each glyph edge by size/4 px, while a canvas stroke of
    `lineWidth` grows it by lineWidth/2: an 8 px sound-word stroke is `outline_size = 16`.
-5. **Inset or degenerate polygons fail triangulation** ("Invalid polygon data") and draw nothing:
-   the tapered ends of a brush stroke and the fibres of a torn edge. `Ink.fill()` falls back to the
-   true shape when the shrunk one won't triangulate and skips feather quads that fold over.
-6. **Clipping a panel** is `Control.clip_contents`; it clips every child, `Node2D` figures
+3. **Clipping a panel** is `Control.clip_contents`; it clips every child, `Node2D` figures
    included. The panel border is an internal child added last, so it draws over the art.

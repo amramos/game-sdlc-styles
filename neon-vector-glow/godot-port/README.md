@@ -6,3 +6,9 @@ needs; this is the whole scene, including the code that rebuilds the web demo ex
 
 Open this folder in Godot. `capture.gd` is an autoload: run with `-- --out=<file.png>` and it saves
 the viewport after a few frames and quits.
+
+The fonts aren't duplicated here. Before opening, fill this folder from the entry's `assets/`:
+
+| Folder | Files |
+|---|---|
+| `fonts/` | OpenSans-Bold.woff, CascadiaMono-Bold.woff from `assets/fonts/`, copied as they are |

@@ -34,3 +34,6 @@ Plain HTML and CSS; no 3D. Colours are CSS custom properties named after the pal
 Stage layers are stacked `<img>` elements in one positioned box; the camera is a CSS transform on
 that box (`scale(1.4)` and a translate toward the subject, 0.4 s ease). The interface lives outside
 the box, so zooming never crops it.
+
+**Fonts:** the demo bundles its fonts in `assets/fonts/` (Bebas Neue and Special Elite); the game
+picks its own.

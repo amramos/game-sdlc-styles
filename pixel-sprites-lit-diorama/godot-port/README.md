@@ -14,3 +14,4 @@ The example art isn't duplicated here. Before opening, fill these folders from t
 | Folder | Files |
 |---|---|
 | `assets/` | elder.png, fig.png, floor-tiles.png, herb.png, kid.png, plaster.png … |
+| `fonts/` | the `.woff` files from `assets/fonts/` (Alegreya-Variable, Alegreya-Italic) |

@@ -127,3 +127,6 @@ on a wrapper, since the clip would cut a box shadow.
 **Palette and lighting switch:** repaint every canvas, set `needsUpdate`, recolour the card backs
 and lights. **Render loop:** about 10 fps when idle, stop when `document.hidden`. See `loop()` in
 demo.html.
+
+**Fonts:** the demo bundles its fonts in `assets/fonts/` (EB Garamond) and waits for them before
+it prints the placard; the game picks its own.

@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pixel sprites in a lit diorama</title>
 <style>
+  /* bundled font (assets/fonts, OFL): Alegreya, upright 400-700 (variable) and italic 400 */
+  @font-face { font-family: "Alegreya"; src: url(assets/fonts/Alegreya-Variable.woff) format("woff"); font-weight: 400 700; font-style: normal; }
+  @font-face { font-family: "Alegreya"; src: url(assets/fonts/Alegreya-Italic.woff) format("woff"); font-weight: 400; font-style: italic; }
   :root { --ink:#F6F1E6; --plate:#1C1820; --accent:#19C2A0; --danger:#F06048; --info:#8AB4F8;
           --plate-90:rgba(28,24,32,.9); --plate-85:rgba(28,24,32,.85); --plate-60:rgba(28,24,32,.6); }
   html, body { margin:0; height:100%; overflow:hidden; background:var(--plate); }
-  body { font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif; color:var(--ink); }
+  body { font-family: "Alegreya", serif; color:var(--ink); }
   canvas#c { display:block; position:absolute; left:0; top:0; }
   /* frame mode: a fixed 1280x720 canvas pinned at the page's top-left, whatever the viewport */
   body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
@@ -237,13 +240,13 @@ function grainCanvas(seed, w = 128, h = 128, n = 900) {
 }
 const grainTex = canvasTex(grainCanvas(7));
 // tileable value maps made in MaterialCraft (assets/README.md): 128 px, four values (0.60-1.00) that
-// multiply the role colour, so a surface keeps its palette role in every palette. Point-sampled up close.
+// multiply the role colour, so a surface keeps its palette role in every palette. Point-sampled, no mipmaps.
 const loading = new THREE.LoadingManager();
 const texLoader = new THREE.TextureLoader(loading);
 function valueMap(name) {
   const t = texLoader.load(IMG(`assets/textures/${name}.png`)); t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.anisotropy = 4; return t;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  return t;
 }
 const TEX = { floor: valueMap('floor-tiles'), roof: valueMap('roof-tiles'), plaster: valueMap('plaster'), wood: valueMap('wood-planks') };
 const TILE = { floor: 4, roof: 2.4, plaster: 8, wood: 2 };   // world units one map covers (128 texels)
@@ -867,7 +870,10 @@ if (!FRAME) {
 
 // ---------- start ----------
 const texReady = new Promise(res => { loading.onLoad = res; loading.onError = res; });
-Promise.all([spritesReady, texReady]).then(() => {    // frames are drawn only once every image is in
+// the bundled font faces, loaded in page time so captions are laid out and measured in them
+const fontsReady = document.fonts ? Promise.all(['400 16px "Alegreya"', '600 16px "Alegreya"', '700 16px "Alegreya"',
+  'italic 400 16px "Alegreya"'].map(f => document.fonts.load(f))) : Promise.resolve();
+Promise.all([spritesReady, texReady, fontsReady]).then(() => {    // frames are drawn only once every image and font is in
   applyPalette();
   select('shopper');
   if (FRAME) setupFrame(FRAME);

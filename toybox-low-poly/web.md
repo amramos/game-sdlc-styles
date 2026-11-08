@@ -121,3 +121,6 @@ const blobMat = new THREE.MeshBasicMaterial({ map: radialGradientTexture, color:
 
 **Render loop:** render on input and while something animates; otherwise about 10 fps, and stop
 when `document.hidden`. See `loop()` in demo.html.
+
+**Fonts:** the demo bundles its fonts (Nunito, and Noto Sans Symbols 2 for the check mark) in
+`assets/fonts/`; a game picks its own.

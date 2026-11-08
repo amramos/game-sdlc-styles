@@ -1,11 +1,11 @@
 # Godot 4 snippets
 
-<!-- matched-web-frame: 95e103e57757 -->
+<!-- matched-web-frame: d66fe8f08621 -->
 
 **Test-rendered** in Godot 4.7.1 (Compatibility). `frames/godot-key-scene.*` rebuilds
 `demo.html?frame=key-scene`: the entry's own stage and cast PNGs (`cast/`) in `TextureRect`s, and
 every panel, word and number drawn by the engine from one theme, with the code on this page.
-Measured match: mean difference 2.4 / 2.0 / 2.8 per 255 (R/G/B) for the PNG render, 1.7 / 1.6 / 1.8
+Measured match: mean difference 2.3 / 2.0 / 2.8 per 255 (R/G/B) for the PNG render, 1.6 / 1.5 / 1.8
 for the delivered JPEG; same layout to the pixel for every panel, chip, card, tail and bracket. What
 still differs is text rasterisation, not layout:
 
@@ -54,11 +54,9 @@ depends on measured sizes (chips under the bubble, the action button, the first 
 shown downscaled (0.57× in the test) uses a plain linear filter: with mipmaps on, outlines came out
 softer than the browser's downscale.
 
-**Fonts.** The port uses `SystemFont` with CSS-like fallback stacks (on a stock Windows machine:
-Impact for display, Courier New for body, Segoe UI Symbol for the chip mark). A game should ship its
-chosen faces as `FontFile`s (the style's licence-safe candidates: Bebas Neue, Oswald or League Gothic
-for display; Special Elite, Space Mono or IBM Plex Mono for body); system fonts differ from machine to
-machine.
+**Fonts.** The demo bundles Bebas Neue (display), Special Elite (body) and a one-glyph subset of
+Noto Sans Math for the chip mark in `assets/fonts/`; the port loads the same `.woff` files from
+`res://fonts/` as `FontFile`s (`_file()` in the theme below), so both draw the same faces.
 
 **Project settings:**
 
@@ -106,16 +104,15 @@ const NIGHT := {
 	"signal": ["#7FB2FF", "#FFC93C", "#3CCB98"], "counter": "#0B0D14",
 }
 
-## Same fallback order as the web demo's CSS stacks. Ship your chosen faces as FontFiles in a game.
-static var display_base := _system(["Bebas Neue", "League Gothic", "Oswald", "Impact", "Arial Narrow"])
-static var body_base := _system(["Special Elite", "Courier New", "IBM Plex Mono"])
-## Chip marks (arrows, signs) the display face lacks: name the symbol face instead of trusting the
-## OS fallback, which picks a different font, size and baseline per platform.
-static var mark_base := _system(["Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans"])
+## The demo's own font files (assets/fonts/ on the web), so the engine draws the same faces.
+static var display_base := _file("res://fonts/BebasNeue-Regular.woff")
+static var body_base := _file("res://fonts/SpecialElite-Regular.woff")
+## The chip mark (↺) neither face has: the demo's small symbol subset, as on the web page, instead
+## of the OS fallback, which picks a different font, size and baseline per platform.
+static var mark_base := _file("res://fonts/NotoSansMath-Marks.woff")
 
-static func _system(names: Array) -> SystemFont:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(names)
+static func _file(path: String) -> FontFile:
+	var f: FontFile = load(path)
 	f.hinting = TextServer.HINTING_NONE                                # browser-like: fractional advances
 	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_ONE_QUARTER
 	return f
@@ -155,7 +152,7 @@ static func build(pal: Dictionary) -> Theme:
 		"Caption":     [display_base, 18, 18.0, 1, ink, 0],     # display face, upper case, small
 		"CardCaption": [display_base, 17, 17.0, 1, ink, 0],
 		"Who":         [display_base, 18, 18.0, 1, paper, 0],
-		"ChipWord":    [display_base, 20, 24.0, 1, ink, 0],
+		"ChipWord":    [display_base, 20, 26.0, 1, ink, 0],     # line-height normal: 1.3 em in this face
 		"Line":        [body_base, 22, 29.04, 0, ink, -1],      # dialogue: body face, 1.32 line height
 		"CardText":    [body_base, 19, 22.8, 0, ink, 0],
 		"Mark":        [mark_base, 16, 24.0, 0, paper, -2],
@@ -183,10 +180,10 @@ static func build(pal: Dictionary) -> Theme:
 		t.set_type_variation(n, "PanelContainer")
 		t.set_stylebox("panel", n, panel(Color(pal.signal[i]), ink, 4, Vector4(4, 3, 10, 2)))
 	# the primary action: ink fill; its hard accent shadow is a child drawn behind it (main.gd)
-	var act := panel(ink, ink, 4, Vector4(26, 10, 28, 6))   # +2 right: CSS letter-spacing also trails the last letter
+	var act := panel(ink, ink, 4, Vector4(26, 10, 27, 6))   # +1 right: CSS letter-spacing also trails the last letter
 	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
 		t.set_stylebox(st, "Button", act)
-	t.set_font("font", "Button", line_font(display_base, 40, 48.0, 2))
+	t.set_font("font", "Button", line_font(display_base, 40, 52.0, 2))   # line-height normal: 1.3 em
 	t.set_font_size("font_size", "Button", 40)
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		t.set_color(c, "Button", paper)
@@ -301,6 +298,12 @@ func label(text: String, variation: String) -> Label:
 	l.theme_type_variation = variation
 	if variation.ends_with("Caption") or variation in ["Who", "ChipWord"]:
 		l.uppercase = true
+	if variation in ["Caption", "Who"]:
+		# CSS letter-spacing (0.06 em) is fractional and also trails the last letter; the theme's
+		# whole-pixel tracking falls 2 px short on a short caption, so size the label like the browser
+		var sz := theme.get_font_size("font_size", variation)
+		var w := InkTheme.display_base.get_string_size(text.to_upper(), 0, -1, sz).x + text.length() * 0.06 * sz
+		l.custom_minimum_size.x = ceilf(w)
 	return l
 
 ## Tilted labels live in a plain slot: containers reset rotation, the slot doesn't.
@@ -398,6 +401,7 @@ func _build_options(ui: Control) -> HBoxContainer:
 		card.custom_minimum_size = Vector2(190, 118)
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 0)
+		col.alignment = BoxContainer.ALIGNMENT_CENTER   # the card is a <button>: it centres short content
 		card.add_child(col)
 		var cap := label(o[0], "CardCaption")
 		cap.modulate.a = 0.9
@@ -410,9 +414,8 @@ func _build_options(ui: Control) -> HBoxContainer:
 		col.add_child(_gap(6))
 		var num := PriceLabel.new()
 		num.number = o[2]
-		num.line_height = 39.0                    # the number's line box, with the body face's strut
-		                                          # (containers lay out in whole px: 2 x 23 + 39 = the web's 45.6 + 39.4)
-		num.baseline_shift = -1.0
+		num.line_height = 36.0                    # the number's line box: 40 px at line-height 0.9; the body
+		                                          # face's strut fits inside it (2 x 23 + 36 = the web's 45.6 + 36)
 		num.color = ink
 		col.add_child(num)
 		slot.add_child(card)
@@ -522,15 +525,13 @@ None of these is Compatibility-specific: Forward+ draws the same frame.
   text 4 px too close to every edge.
 - **Containers lay out in whole pixels.** Fractional line heights (22.8 px) round per child, so a
   card grows by a pixel and every bracket and lift after it moves. Budget line boxes in whole pixels.
-- **Hinting rounds advances.** With `SystemFont`'s default hinting, a 22 px monospace advance is 13
-  px instead of 13.2: a 37-character line ends 7 px short. `HINTING_NONE` plus quarter-pixel subpixel
-  positioning gives fractional advances.
+- **Hinting rounds advances** (`godot-compatibility.md` trap 24): a 22 px monospace advance was
+  13 px instead of 13.2, so a 37-character line ended 7 px short.
 - **Godot rounds ascent and descent up,** a browser rounds to nearest, so a line height centres the
   glyphs up to 1 px differently; each role in the theme has a `shift` for this.
 - **Letter-spacing.** Godot's `spacing_glyph` doesn't follow the last letter as CSS letter-spacing
-  does; add it to the right margin where a box must fit (the action button). It is whole pixels.
-- **Symbol fallback.** A mark the display face lacks (↺) falls back to an OS font of a different
-  size and baseline per platform. Name a symbol face for marks.
-- **2D MSAA** (`anti_aliasing/quality/msaa_2d`) changed nothing; `draw_colored_polygon()` edges
-  (tail, brackets) are aliased either way, which at 4 px ink on these shapes is within a pixel of
-  the web.
+  does, and it is whole pixels; add the rest to the right margin where a box must fit (the action
+  button) or size the label as the browser does (`label()`, for captions).
+- **Symbol fallback** (trap 25): the ↺ the display face lacks comes from a bundled symbol face.
+- **2D MSAA** (trap 18): the tail and bracket edges are aliased, which at 4 px ink on these
+  shapes is within a pixel of the web.

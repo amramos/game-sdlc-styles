@@ -9,10 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The checker lives in the SDLC plugin, so the site and the plugin never drift apart.
+      # The checker lives in the SDLC plugin, so the site and the plugin never drift apart. It is
+      # pinned to a release: a stricter checker on the SDLC's main can't turn the site red until the
+      # site is updated for it. Bump the tag when a release changes check_entries.py.
       - uses: actions/checkout@v4
         with:
           repository: amramos/game-ai-sdlc
+          ref: v0.13.0
           path: .sdlc
       - uses: actions/setup-python@v5
         with:

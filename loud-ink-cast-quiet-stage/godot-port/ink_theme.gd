@@ -8,16 +8,15 @@ const NIGHT := {
 	"signal": ["#7FB2FF", "#FFC93C", "#3CCB98"], "counter": "#0B0D14",
 }
 
-## Same fallback order as the web demo's CSS stacks. Ship your chosen faces as FontFiles in a game.
-static var display_base := _system(["Bebas Neue", "League Gothic", "Oswald", "Impact", "Arial Narrow"])
-static var body_base := _system(["Special Elite", "Courier New", "IBM Plex Mono"])
-## Chip marks (arrows, signs) the display face lacks: name the symbol face instead of trusting the
-## OS fallback, which picks a different font, size and baseline per platform.
-static var mark_base := _system(["Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans"])
+## The demo's own font files (assets/fonts/ on the web), so the engine draws the same faces.
+static var display_base := _file("res://fonts/BebasNeue-Regular.woff")
+static var body_base := _file("res://fonts/SpecialElite-Regular.woff")
+## The chip mark (↺) neither face has: the demo's small symbol subset, as on the web page, instead
+## of the OS fallback, which picks a different font, size and baseline per platform.
+static var mark_base := _file("res://fonts/NotoSansMath-Marks.woff")
 
-static func _system(names: Array) -> SystemFont:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(names)
+static func _file(path: String) -> FontFile:
+	var f: FontFile = load(path)
 	f.hinting = TextServer.HINTING_NONE                                # browser-like: fractional advances
 	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_ONE_QUARTER
 	return f
@@ -57,7 +56,7 @@ static func build(pal: Dictionary) -> Theme:
 		"Caption":     [display_base, 18, 18.0, 1, ink, 0],     # display face, upper case, small
 		"CardCaption": [display_base, 17, 17.0, 1, ink, 0],
 		"Who":         [display_base, 18, 18.0, 1, paper, 0],
-		"ChipWord":    [display_base, 20, 24.0, 1, ink, 0],
+		"ChipWord":    [display_base, 20, 26.0, 1, ink, 0],     # line-height normal: 1.3 em in this face
 		"Line":        [body_base, 22, 29.04, 0, ink, -1],      # dialogue: body face, 1.32 line height
 		"CardText":    [body_base, 19, 22.8, 0, ink, 0],
 		"Mark":        [mark_base, 16, 24.0, 0, paper, -2],
@@ -85,10 +84,10 @@ static func build(pal: Dictionary) -> Theme:
 		t.set_type_variation(n, "PanelContainer")
 		t.set_stylebox("panel", n, panel(Color(pal.signal[i]), ink, 4, Vector4(4, 3, 10, 2)))
 	# the primary action: ink fill; its hard accent shadow is a child drawn behind it (main.gd)
-	var act := panel(ink, ink, 4, Vector4(26, 10, 28, 6))   # +2 right: CSS letter-spacing also trails the last letter
+	var act := panel(ink, ink, 4, Vector4(26, 10, 27, 6))   # +1 right: CSS letter-spacing also trails the last letter
 	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
 		t.set_stylebox(st, "Button", act)
-	t.set_font("font", "Button", line_font(display_base, 40, 48.0, 2))
+	t.set_font("font", "Button", line_font(display_base, 40, 52.0, 2))   # line-height normal: 1.3 em
 	t.set_font_size("font_size", "Button", 40)
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		t.set_color(c, "Button", paper)

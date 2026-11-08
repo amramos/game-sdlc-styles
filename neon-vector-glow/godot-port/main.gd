@@ -178,8 +178,9 @@ func step_parts(dt: float) -> void:
 	parts = parts.filter(func(p): return p.life > 0)
 
 # ------------------------------------------------------------------ HUD text
-var f_body := SystemFont.new()
-var f_num := SystemFont.new()
+## The demo's own font files (assets/fonts/ on the web), in the one weight the key scene uses.
+var f_body: Font = load("res://fonts/OpenSans-Bold.woff")
+var f_num: Font = load("res://fonts/CascadiaMono-Bold.woff")
 var f_label := FontVariation.new()   # body font with 2 px tracking (ctx.letterSpacing = "2px")
 ## Glyphs are rasterised at the supersampled size (size x SS under a 1/SS transform), not scaled up.
 ## Tracked text (f_label) measures 2 px wider, as the canvas counts the spacing after the last letter.
@@ -196,8 +197,6 @@ func text(ci: CanvasItem, f: Font, s: String, x: float, y: float, size: int, alp
 # ------------------------------------------------------------------ key scene
 func _ready() -> void:
 	add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-	f_body.font_names = PackedStringArray(["Segoe UI", "Helvetica Neue", "Arial", "sans-serif"]); f_body.font_weight = 700
-	f_num.font_names = PackedStringArray(["Cascadia Mono", "Consolas", "DejaVu Sans Mono", "monospace"]); f_num.font_weight = 700
 	f_label.base_font = f_body; f_label.spacing_glyph = 2 * GlowPass.SS
 
 	grid_reset()

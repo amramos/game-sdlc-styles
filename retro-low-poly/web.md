@@ -136,3 +136,6 @@ at the top to `fog` at the middle row. `scene.background` = the `fog` colour.
 
 **Render loop:** render while the camera eases or on input; otherwise about 10 fps; stop when
 `document.hidden`. See `loop()` in demo.html.
+
+**Fonts:** the demo bundles its fonts (Fira Sans, and Noto Sans Symbols 2 for the check mark) in
+`assets/fonts/`; a game picks its own. The world signs are bitmap glyphs drawn in code.

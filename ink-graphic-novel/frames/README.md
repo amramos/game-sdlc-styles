@@ -8,8 +8,9 @@ radio room).
 
 **Capture:** `demo.html?frame=<name>` draws once on a fixed 1280×720 canvas at the page's top-left,
 after every image has decoded, then sets `document.title` to `ready`; no animation runs. Captured
-with headless Chrome on the GPU, saved as JPEG quality 85. Fonts fall back to system faces (Comic
-Sans MS or Comic Neue for lettering, Georgia for titles), so captures differ slightly between systems.
+with headless Chrome on the GPU, saved as JPEG quality 85. Every word uses the fonts bundled in
+`assets/fonts/` (Comic Neue lettering, Alegreya titles, Arimo for the `dont` frame's small sans-serif),
+so captures look the same on every system.
 
 | File | URL | Shows |
 |---|---|---|

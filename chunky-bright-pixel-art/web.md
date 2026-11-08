@@ -57,3 +57,6 @@ drawSprite(s, Math.round(e.x) - cx, Math.round(e.y) - cy);
 Text: draw the bitmap font into the same buffer. `ctx.fillText` with a system font is anti-aliased
 and off the grid; if it is unavoidable, use a pixel font file at an exact multiple of its design size
 and integer coordinates.
+
+The demo bundles its fonts in `assets/fonts/` (Silkscreen for the `dont` frame's off-grid text,
+JetBrains Mono for the page controls); a game picks its own.

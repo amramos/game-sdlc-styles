@@ -8,12 +8,16 @@
      Stage and cast are generated images in cast/ (see cast/README.md); every panel, chip, label,
      word and number is drawn here as live HTML/CSS. No network, no storage. -->
 <style>
+  @font-face { font-family:"Bebas Neue"; src:url(assets/fonts/BebasNeue-Regular.woff) format("woff"); font-weight:400; }
+  @font-face { font-family:"Special Elite"; src:url(assets/fonts/SpecialElite-Regular.woff) format("woff"); font-weight:400; }
+  /* the "regular" chip's mark: neither face has it */
+  @font-face { font-family:"Noto Sans Math"; src:url(assets/fonts/NotoSansMath-Marks.woff) format("woff"); unicode-range:U+21BA; }
   :root {
     --ink:#121624; --paper:#F2EADB; --accent:#FF4A1C; --shadow:#12333A;
     --signal-1:#7FB2FF; --signal-2:#FFC93C; --signal-3:#3CCB98;
     --counter:#0B0D14; --key:#FF00FF;
-    --display: "Bebas Neue", "League Gothic", "Oswald", Impact, "Arial Narrow", sans-serif;
-    --body: "Special Elite", "Courier New", "IBM Plex Mono", ui-monospace, monospace;
+    --display: "Bebas Neue", "Noto Sans Math", sans-serif;
+    --body: "Special Elite", "Noto Sans Math", monospace;
   }
   html, body { margin:0; height:100%; overflow:hidden; background:#0A0B10; }
   body { font-family:var(--body); color:var(--ink); }
@@ -386,6 +390,8 @@ if (FRAME) {
   // wait for every image and font, then two settled frames, then signal the capturer
   const imgs = [...document.images].filter(i => i.getAttribute('src'));
   Promise.all(imgs.map(i => i.decode().catch(() => {})))
+    .then(() => document.fonts ? Promise.all(['16px "Bebas Neue"', '16px "Special Elite"', '16px "Noto Sans Math"']
+      .map(f => document.fonts.load(f, f.includes('Math') ? '↺' : 'a'))) : null)
     .then(() => document.fonts ? document.fonts.ready : null)
     .then(() => { layout(); setFocus(focusIdx, true); requestAnimationFrame(() => requestAnimationFrame(() => { document.title = 'ready'; })); });
 }

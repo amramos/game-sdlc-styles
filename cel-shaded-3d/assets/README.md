@@ -77,3 +77,14 @@ Everything the page loads is embedded: both models are base64 in their `.glb.js`
 textures travel inside the GLB, so the page works when opened straight from `file://`.
 
 Total folder size about 0.8 MB.
+
+## Fonts (`fonts/`)
+
+Subset to Latin (plus the symbols the page draws) and saved as WOFF with fontTools, from the google/fonts repository; each licence sits beside its font.
+
+| File | Face | Licence | Size |
+|---|---|---|---|
+| `Fredoka-Variable.woff` | Fredoka, display (titles, names, decisive numbers), weights 300–700 (variable, width fixed at 100) | SIL OFL 1.1, `FREDOKA-OFL.txt` | 36 KB |
+| `Nunito-Variable.woff` | Nunito, body, weights 200–1000 (variable) | SIL OFL 1.1, `NUNITO-OFL.txt` | 52 KB |
+| `NotoSansSymbols2-Regular.woff` | Noto Sans Symbols 2: ▲ ▼ ◆ ● ▶ ✓ only | SIL OFL 1.1, `NOTOSANSSYMBOLS2-OFL.txt` | 1 KB |
+| `NotoSansSymbols-Regular.woff` | Noto Sans Symbols: → only | SIL OFL 1.1, `NOTOSANSSYMBOLS-OFL.txt` | 1 KB |

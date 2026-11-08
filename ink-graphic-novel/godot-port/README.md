@@ -14,3 +14,4 @@ The example art isn't duplicated here. Before opening, fill these folders from t
 | Folder | Files |
 |---|---|
 | `art/` | bg-exterior.png, bg-radio-room.png, bg-slope.png, dog-close.png, dog.png, ice-axe.png … |
+| `fonts/` | the `.woff` files from `assets/fonts/` (Alegreya-Bold, ComicNeue-Bold, ComicNeue-Regular) |

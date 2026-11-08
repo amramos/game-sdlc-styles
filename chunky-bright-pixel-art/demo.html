@@ -5,11 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chunky bright pixel art - demo</title>
 <style>
+  /* bundled fonts (assets/fonts, OFL): Silkscreen for text inside the game frame, JetBrains Mono for page UI */
+  @font-face { font-family: "Silkscreen"; src: url(assets/fonts/Silkscreen-Regular.woff) format("woff"); font-weight: 400; font-style: normal; }
+  @font-face { font-family: "JetBrains Mono"; src: url(assets/fonts/JetBrainsMono-Regular.woff) format("woff"); font-weight: 400; font-style: normal; }
   html, body { margin: 0; height: 100%; background: #1E1430; overflow: hidden; }
   canvas { position: absolute; image-rendering: pixelated; image-rendering: crisp-edges; }
   #ui { position: fixed; left: 8px; bottom: 8px; display: flex; gap: 6px; align-items: center;
-        font: 14px monospace; color: #FFF4D6; }
-  #ui button { font: 14px monospace; padding: 4px 8px; cursor: pointer; }
+        font: 14px "JetBrains Mono", monospace; color: #FFF4D6; }
+  #ui button { font: 14px "JetBrains Mono", monospace; padding: 4px 8px; cursor: pointer; }
   #ui .sw { width: 14px; height: 14px; display: inline-block; outline: 1px solid #0008; }
   body.frame #ui { display: none; }
 </style>
@@ -423,16 +426,18 @@ function dontFrame() {
   // soft drop shadow and a glow outline in a colour not in the palette
   ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 18;
   ctx.fillStyle = '#7a5cff'; ctx.fillRect(1004.5, 300.5, 120, 34); ctx.shadowBlur = 0;
-  // tiny anti-aliased system text, off the pixel grid
-  ctx.font = '9px sans-serif'; ctx.fillStyle = '#ffffff';
+  // tiny anti-aliased text, off the pixel grid: the pixel font at a size that is no multiple of its grid
+  ctx.font = '9px "Silkscreen", monospace'; ctx.fillStyle = '#ffffff';
   ctx.fillText('Trade (press E) — 12480 coins — Day 3, noon', 1009.3, 321.7);
-  ctx.font = 'italic 13px serif'; ctx.fillStyle = '#d8d8d8'; ctx.fillText('coins: 12,480', 18.4, 30.6);
+  ctx.font = 'italic 13px "Silkscreen", monospace'; ctx.fillStyle = '#d8d8d8'; ctx.fillText('coins: 12,480', 18.4, 30.6);
 }
 
 // ---------------------------------------------------------------- boot
 const FRAMES = { 'key-scene': () => keyScene(0), 'character': characterFrame, 'prop': propFrame, 'text-heavy': textHeavy };
-function boot() {
+async function boot() {
   buildSprites();
+  // canvas text only draws in a font that has loaded: wait in page time before the first frame
+  if (document.fonts) await Promise.all(['14px "Silkscreen"', '14px "JetBrains Mono"'].map(f => document.fonts.load(f)));
   const q = new URLSearchParams(location.search), frame = q.get('frame');
   if (q.get('palette') && PALETTES[q.get('palette')]) palName = q.get('palette');
   if (frame) {

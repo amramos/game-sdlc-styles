@@ -148,3 +148,6 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.Shad
 
 **Render loop:** render on demand or cap at ~10 fps when nothing moves, and stop when
 `document.hidden`; see `demo.html`.
+
+**Fonts:** the demo bundles its fonts (Fredoka for display, Nunito for body, Noto Sans Symbols 2 for
+the chip icons) in `assets/fonts/`; a game picks its own.

@@ -58,13 +58,13 @@ const paint = (hex, map = grainTex) => new THREE.MeshToonMaterial({ color: hex, 
 ```
 
 **Surface value maps** (floor, plaster, roof, planks): a grey tileable map of four values multiplies
-the role colour, point-sampled up close, with box UVs in world units so every face shows one texel
-size:
+the role colour, point-sampled at every distance (no mipmaps, no anisotropy, so the steps between
+values stay hard), with box UVs in world units so every face shows one texel size:
 
 ```js
 const t = new THREE.TextureLoader().load('textures/floor-tiles.png');   // 128², values 0.60–1.00
 t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
-t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
 const floor = paint(palette.ground, t);
 function worldUV(geo, tile) {                           // tile: world units one map covers
   const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
@@ -159,6 +159,9 @@ const sx = (v.x + 1) / 2 * W, sy = (1 - v.y) / 2 * H;
 // try above, slid sideways and raised, then beside, then below; first spot clear of placed captions
 // and sprites wins; after 4 full captions the rest show a short name; no spot = hidden
 ```
+
+The demo bundles its caption font in `assets/fonts/` (Alegreya, OFL) and waits for it before the
+first frame; a game picks its own.
 
 Clicks go to invisible hit spheres (`new THREE.MeshBasicMaterial({ visible: false })`, radius 0.75)
 through a `Raycaster`, never to the caption text.

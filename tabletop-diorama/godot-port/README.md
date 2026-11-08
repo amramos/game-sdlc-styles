@@ -13,5 +13,6 @@ The example art isn't duplicated here. Before opening, fill these folders from t
 
 | Folder | Files |
 |---|---|
+| `fonts/` | Gelasio-Variable.woff (copied from `assets/fonts/`) |
 | `models/` | baker.glb, bakery.glb, cart.glb, stall.glb |
 | `textures/` | baker_finish.jpg, bakery_blue.jpg, bakery_cream.jpg, bakery_green.jpg, bakery_ochre.jpg, cart_red.jpg … |

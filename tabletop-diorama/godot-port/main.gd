@@ -18,7 +18,7 @@ const T := 2.0                    # the demo's fixed frame time
 
 var wood_shader := preload("res://wood.gdshader")
 var ring_shader := preload("res://ring.gdshader")
-var font: SystemFont
+var font: FontFile
 var grain: ImageTexture
 var mats := {}
 
@@ -331,6 +331,14 @@ func carve(tris: Array, amt: float) -> Array:
 			t[k] = p + offs[key]
 	return tris
 
+## An open vessel from a carved cylinder(): the wall, the wall again wound the other way (its inside)
+## and the base, without the lid. Carve the closed cylinder first so the seeded jitter stays in step.
+func open_top(t: Array, seg: int) -> Array:
+	var out := t.slice(0, 2 * seg)
+	for w in t.slice(0, 2 * seg): out.append(tri(w[0], w[2], w[1], w[3], w[5], w[4]))
+	out.append_array(t.slice(3 * seg))
+	return out
+
 func to_mesh(tris: Array) -> ArrayMesh:
 	var v := PackedVector3Array(); var nrm := PackedVector3Array(); var uv := PackedVector2Array()
 	for t in tris:
@@ -473,7 +481,7 @@ func shop(o: Dictionary) -> Node3D:
 
 # ------------------------------------------------------------------ scene
 func _ready() -> void:
-	font = SystemFont.new(); font.font_names = PackedStringArray(["Georgia", "Gelasio", "serif"])
+	font = load("res://fonts/Gelasio-Variable.woff")   # the demo's bundled face (variable; default instance is 400)
 	grain = make_grain()
 	var world := group(self)
 
@@ -532,8 +540,9 @@ func _ready() -> void:
 		part(pin, carve(cylinder(0.07, 0.08, 0.55, 8), 0.006), paint("wood-bare", 0.9), Vector3(s * 1.57, 0, 0), Vector3(0, 0, PI / 2))
 	var cup := group(world, Vector3(-4.7, 0, -1.7))
 	part(cup, carve(cylinder(0.72, 0.6, 0.06, 14), 0.008), paint("paint-cream", 0.5), Vector3(0, 0.03, 0))
-	part(cup, carve(cylinder(0.48, 0.35, 0.8, 14), 0.008), paint("paint-blue", 0.5), Vector3(0, 0.46, 0))
-	part(cup, circle(0.43, 14), paint("paint-brown", 0.3, true), Vector3(0, 0.865, 0), Vector3(-PI / 2, 0, 0))
+	part(cup, open_top(carve(cylinder(0.48, 0.35, 0.8, 14), 0.008), 14), paint("paint-blue", 0.5), Vector3(0, 0.46, 0))
+	# coffee 0.04 below the rim, its corners turned onto the wall's (half a segment) and kept inside it
+	part(cup, circle(0.46, 14), paint("paint-brown", 0.3, true), Vector3(0, 0.82, 0), Vector3(-PI / 2, 0, PI / 14))
 	part(cup, carve(torus(0.17, 0.045, 6, 10, PI * 1.3), 0.004), paint("paint-blue", 0.5), Vector3(0.5, 0.5, 0), Vector3(0, 0, -PI * 0.65))
 	var cards := group(world, Vector3(4.75, 0, 1.7), -0.3)
 	for i in 4:
@@ -584,7 +593,7 @@ func build_env() -> void:
 
 # ------------------------------------------------------------------ interface: paper cards
 func small_caps(s: String, size: int) -> String:
-	var out := ""; var small := int(round(size * 0.77))
+	var out := ""; var small := int(round(size * 0.7))   # Chrome synthesises small caps at 0.7 of the size
 	for ch in s:
 		if ch != ch.to_upper():
 			out += "[font_size=%d]%s[/font_size]" % [small, ch.to_upper()]
@@ -612,22 +621,28 @@ func text(s: String, size: int, line_h: float, center := false) -> Label:
 	l.add_theme_color_override("font_color", c("ink"))
 	var fh := font.get_height(size)
 	l.add_theme_constant_override("line_spacing", int(round(line_h - fh)))
+	var lead := StyleBoxEmpty.new()   # CSS half-leading above the first line and below the last
+	lead.content_margin_top = (line_h - fh) / 2.0; lead.content_margin_bottom = (line_h - fh) / 2.0
+	l.add_theme_stylebox_override("normal", lead)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if center: l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return l
 
 func build_hud() -> void:
 	var hud := CanvasLayer.new(); hud.layer = 2; add_child(hud)
-	var day := card(Vector2(20, 18), 320, 12 + 24 + 6 + 16 * 1.32 + 12, -1.4, Vector2(16, 12), 1); hud.add_child(day)
+	var day := card(Vector2(20, 18), 320, 12 + 24 + 6 + 16 * 1.32 + 12, -1.4, Vector2(16, 12)); hud.add_child(day)
 	var vb := VBoxContainer.new(); vb.add_theme_constant_override("separation", 6); day.add_child(vb)
-	vb.position.y = 1
+	var line := MarginContainer.new()   # the h3 in CSS's 24 px line box: a taller font box overhangs it by the half-leading
+	var lead := int(round((24 - font.get_height(20)) / 2.0))
+	line.add_theme_constant_override("margin_top", lead); line.add_theme_constant_override("margin_bottom", lead)
+	vb.add_child(line)
 	var h3 := RichTextLabel.new(); h3.bbcode_enabled = true; h3.fit_content = true; h3.scroll_active = false
 	var spaced := FontVariation.new(); spaced.base_font = font
 	spaced.spacing_glyph = 1   # letter-spacing .03em (0.6 px; Godot spacing is whole pixels)
 	h3.add_theme_font_override("normal_font", spaced); h3.add_theme_font_size_override("normal_font_size", 20)
 	h3.add_theme_color_override("default_color", c("ink"))
 	h3.text = small_caps("Day 12 · 5:40 in the morning", 20)
-	vb.add_child(h3)
+	line.add_child(h3)
 	vb.add_child(text("Three orders before the market bell", 16, 16 * 1.32))
 	var spoken := card(Vector2(360, 18), 520, 10 + 2 * 24 * 1.36 + 10, -0.5, Vector2(20, 10)); hud.add_child(spoken)
 	spoken.add_child(text("The first loaves are out. Which cart goes up the hill before the bell?", 24, 24 * 1.36, true))

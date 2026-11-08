@@ -13,9 +13,9 @@ draws the same frame (mean 0.1/255 against the Compatibility render). What still
   supersampling against the canvas's analytic antialiasing.
 - **The wide bloom** is smoother in Godot: the canvas blurs in 8 bits at quarter resolution and
   multiplies by 3.2, so its bloom bands in steps of 3 levels. Godot's float blur doesn't.
-- **HUD glyphs** sit within 1 px of the web's (hinting), using the same system fonts.
+- **HUD glyphs** sit within 1 px of the web's (hinting), drawn from the same font files.
 
-<!-- matched-web-frame: 3f31948ee485 -->
+<!-- matched-web-frame: 80d521908988 -->
 
 The whole project that rendered the frame, including the script that rebuilds the web demo exactly
 (its seeded random, shapes, positions and HUD values), is in this entry's `godot-port/` on the
@@ -65,11 +65,9 @@ then alias, but the bloom is unchanged. Or drop the danger pass's half-resolutio
 - `GlowPass.setup()` sizes its SubViewports from `get_window().size` (real pixels) and scales its
   content to match, as the demo scales its canvas by `devicePixelRatio`. Rebuild the passes when the
   window size changes.
-- Fonts: `SystemFont` "Cascadia Mono" (fallbacks Consolas, DejaVu Sans Mono), weight 700, for
-  numbers; "Segoe UI" (fallbacks Helvetica Neue, Arial), weight 700, for labels. These are the fonts
-  the demo asks for. For a shipped game bundle Cascadia Mono (SIL OFL) and a free sans such as
-  Inter or Noto Sans for labels.
-- No imported assets: everything is drawn in code.
+- Fonts: the demo's own files from its `assets/fonts/`, copied to `res://fonts/` and loaded as
+  `FontFile`s: Cascadia Mono Bold for numbers, Open Sans Bold for labels (both SIL OFL).
+- No other imported assets: everything else is drawn in code.
 
 ## glow_pass.gd
 
@@ -363,7 +361,10 @@ func dashed_ring(c: Vector2, r: float, on: float, off: float, offset: float) -> 
 the spacing after the last letter when it aligns text, and Godot doesn't, so add it to the width:
 
 ```gdscript
-var f_label := FontVariation.new()   # base_font = the body SystemFont, spacing_glyph = 2 * GlowPass.SS
+## The demo's own font files (assets/fonts/ on the web), in the one weight the key scene uses.
+var f_body: Font = load("res://fonts/OpenSans-Bold.woff")
+var f_num: Font = load("res://fonts/CascadiaMono-Bold.woff")
+var f_label := FontVariation.new()   # base_font = f_body, spacing_glyph = 2 * GlowPass.SS
 
 func text(ci: CanvasItem, f: Font, s: String, x: float, y: float, size: int, alpha := 1.0, right := false) -> float:
 	var ss := GlowPass.SS
@@ -404,19 +405,14 @@ tested here.
 
 ## Compatibility traps found here
 
-- **No 2D antialiasing in Compatibility (4.7.1).** Turning `Line2D.antialiased` off and setting
-  `msaa_2d` to 8× (project setting, root viewport and every SubViewport) left the frame unchanged,
-  byte for byte. Lines come out stair-stepped, and thin lines that straddle a
-  pixel edge fill two whole pixels (a 1.1 px centre line looked 2 px wide). Forward+ honours 2D MSAA.
-  The fix that works in both renderers is to supersample: draw at 2× and filter down.
-- **Additive strokes stack where one path overlaps itself.** One canvas stroke covers a pixel once.
-  Separate additive `Line2D`s add twice where rings or crosses overlap, so a cluster of
-  overlapping rings bloomed too bright (up to +13/255 near it). Draw each path's bloom-source strokes opaque inside a
-  `CanvasGroup` and add the group.
-- **A `CanvasGroup` with a `CanvasItemMaterial` set to ADD** turned every group into a white
-  rectangle in a transparent SubViewport. The explicit `group_add.gdshader` above (read the group's
-  backbuffer, add its colour) works.
-- **Transparent SubViewports hold premultiplied colour.** Composite them with
-  `BLEND_MODE_PREMULT_ALPHA`, and write blur results with `blend_premul_alpha`, or edges darken.
-- **Fonts scaled by a node transform are rasterised at the original size and stretched.** Draw text
-  at the layer's resolution instead (size × SS under a 1/SS transform).
+From `godot-compatibility.md` (copied beside this file), as they showed here:
+
+- **18:** `msaa_2d` at 8× on the project, the root viewport and every SubViewport left the frame
+  unchanged byte for byte; a 1.1 px centre line looked 2 px wide. `GlowPass` supersamples at 2×.
+- **21:** separate additive `Line2D`s made a cluster of overlapping rings bloom up to +13/255 too
+  bright. Each path's bloom-source strokes are opaque inside a `CanvasGroup`, added once.
+- **20:** a `CanvasItemMaterial` set to ADD turned every group into a white rectangle;
+  `group_add.gdshader` above works.
+- **19:** SubViewports are composited with `BLEND_MODE_PREMULT_ALPHA`, blur results written with
+  `blend_premul_alpha`.
+- **23:** text is drawn at the layer's resolution (size × SS under a 1/SS transform).

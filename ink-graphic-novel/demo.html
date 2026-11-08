@@ -5,12 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ink graphic novel - demo</title>
 <style>
+  /* bundled fonts (assets/fonts, OFL): Comic Neue lettering, Alegreya titles, Arimo for small sans text */
+  @font-face { font-family: "Comic Neue"; src: url(assets/fonts/ComicNeue-Bold.woff) format("woff"); font-weight: 700; }
+  @font-face { font-family: "Comic Neue"; src: url(assets/fonts/ComicNeue-Regular.woff) format("woff"); font-weight: 400; }
+  @font-face { font-family: "Alegreya"; src: url(assets/fonts/Alegreya-Bold.woff) format("woff"); font-weight: 700; }
+  @font-face { font-family: "Arimo"; src: url(assets/fonts/Arimo-Regular.woff) format("woff"); font-weight: 400; }
   html, body { margin: 0; height: 100%; background: #080A10; overflow: hidden; }
   #view { position: absolute; left: 0; top: 0; }
   body.frame #view { position: fixed; left: 0; top: 0; width: 1280px; height: 720px; }
   #ui { position: fixed; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px;
-        align-items: center; font: 14px sans-serif; color: #ECE4CE; }
-  #ui button { font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+        align-items: center; font: 14px Arimo, sans-serif; color: #ECE4CE; }
+  #ui button { font: 13px Arimo, sans-serif; padding: 4px 8px; cursor: pointer; }
   #ui .sw { width: 14px; height: 14px; display: inline-block; outline: 1px solid #0008; }
   body.frame #ui { display: none; }
 </style>
@@ -207,9 +212,9 @@ function glow(x, y, r, col) {              // used only by the 'dont' frame
 }
 
 // ---------------------------------------------------------------- lettering
-const LET = '"Comic Neue","Comic Sans MS","Chalkboard SE","Segoe Print",cursive';
-const TIT = '"IM Fell English SC",Georgia,"Times New Roman",serif';
-const font = (px, kind = 'let') => MODE === 'dont' ? `${Math.round(px * 0.62)}px Arial,sans-serif`
+const LET = '"Comic Neue",cursive';
+const TIT = '"Alegreya",serif';
+const font = (px, kind = 'let') => MODE === 'dont' ? `${Math.round(px * 0.62)}px Arimo,sans-serif`
   : kind === 'tit' ? `small-caps 700 ${px}px ${TIT}` : `700 ${px}px ${LET}`;
 function wrap(text, f, maxW) {
   ctx.font = f;
@@ -577,7 +582,7 @@ function dontFrame() {
   keyScene(0);
   glow(1180, 600, 160, 'rgba(255,120,40,0.7)');            // a second and third warm thing
   ctx.fillStyle = '#ff5a1f'; roundRect(1150, 640, 100, 40, 20); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = '12px Arial,sans-serif'; ctx.textBaseline = 'top'; ctx.fillText('CONTINUE ›', 1166, 654);
+  ctx.fillStyle = '#fff'; ctx.font = '12px Arimo,sans-serif'; ctx.textBaseline = 'top'; ctx.fillText('CONTINUE ›', 1166, 654);
   MODE = 'ink';
 }
 
@@ -590,7 +595,9 @@ async function boot() {
   if (q.get('palette') && PALETTES[q.get('palette')]) palName = q.get('palette');
   P = PALETTES[palName];
   await loadArt();
-  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  // canvas text only draws in a font that has loaded: load each bundled face in page time first
+  if (document.fonts) await Promise.all(['700 16px "Comic Neue"', '400 16px "Comic Neue"', '700 16px "Alegreya"',
+    '400 16px Arimo'].map(f => document.fonts.load(f)));
   if (frame) {
     // frame mode: a fixed 1280x720 canvas at the page's top-left, drawn once, no loop
     document.body.classList.add('frame');

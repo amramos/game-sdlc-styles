@@ -1,6 +1,6 @@
 # Godot 4 snippets
 
-<!-- matched-web-frame: abb4f6e83b6b -->
+<!-- matched-web-frame: 2a45adcaadb7 -->
 
 > **The `assets/` paths below load this entry's example art**, which is how the port was tested against the web demo. A game never ships it: load the game's own models, sprites and textures, made the same way, in their place.
 
@@ -15,7 +15,7 @@ demo exactly, is in this entry's `godot-port/` on the catalog site.
 What still differs from the web frame, and why:
 
 - **Text.** Godot and Chrome rasterise glyphs differently, and the browser synthesises small caps
-  and spaces letters by fractions of a pixel. The paper cards are the worst tiles, at about 16/255.
+  and spaces letters by fractions of a pixel. The paper cards are the worst tiles, at about 14/255.
 - **Shadow edges.** Compatibility ignores `shadow_blur`, so the edge is a little harder than the
   web's `PCFSoftShadowMap`.
 - **Antialiased edges.** MSAA resolves after the sRGB encode here and before it on the web.
@@ -60,34 +60,30 @@ What still differs from the web frame, and why:
 - **Colour maps** (table, street, painted model maps): lossless (`compress/mode=0`), mipmaps on. At
   load, `lin_tex()` converts each to linear bytes and builds the mipmaps from the linear values (see
   the traps). **Normal maps:** lossless, mipmaps on, `compress/normal_map=2` (no Godot conversion).
-- **Font:** the demo uses the system's Georgia. The render uses `SystemFont` with Georgia; for a web
-  export, bundle Gelasio (SIL Open Font License, metric-compatible with Georgia) and put it in the
-  same `font_names` list.
+- **Font:** the demo bundles Gelasio (SIL Open Font License, metric-compatible with Georgia) as WOFF
+  in `assets/fonts/`; the port loads the same file from `res://fonts/` in `_ready()`:
+
+  ```gdscript
+  font = load("res://fonts/Gelasio-Variable.woff")   # the demo's bundled face (variable; default instance is 400)
+  ```
 
 ## Compatibility traps
 
-1. **`ALBEDO` is treated as sRGB and linearised after `fragment()`**, lit or `unshaded`: writing 0.5
-   lit the face as 0.214. And `source_color` samplers are not decoded on the GPU. Compute the albedo
-   in linear, then hand Compatibility `to_srgb(albedo)` (`#if CURRENT_RENDERER ==
-   RENDERER_COMPATIBILITY`); Forward+ takes it as is.
-2. **Textures are filtered before the sRGB decode**, so the mipmaps of a contrasty map (planks,
-   grain) come out about 2/255 darker than in a browser. Fix: `Image.srgb_to_linear()` once at
-   load, `generate_mipmaps()` on the linear bytes, sample raw.
-3. **`DirectionalLight3D.shadow_blur` does nothing in Compatibility** (identical frames at 1, 2
-   and 3). The atlas size and `directional_shadow_max_distance` are the only levers: 4096 over 22
-   units is closest to the web's penumbra; 2048, 8192, 16 or 40 units were all further off.
-4. **`shadow_normal_bias` 1.0 darkens lit faces by about 1.5%** (the filter shadows a face against
-   itself). 2.0 removes it.
-5. **No Environment ambient with a shadowed light:** add the fill inside `light()` instead, and mix
-   the fog there too. Pass linear colours to shaders as `Vector3`, not `Color`.
-6. **Writing `ALPHA` moves every material using that shader to the transparent pass**, so the
-   accent ring has a shader of its own.
+From `godot-compatibility.md` (copied beside this file), as they show here:
+
+- **2:** albedo is computed in linear and handed to Compatibility as `to_srgb(albedo)`.
+- **15:** colour maps' mipmaps came out about 2/255 darker; `lin_tex()` converts once at load and
+  builds the mipmaps from the linear values.
+- **12:** with `shadow_blur` doing nothing, 4096 over 22 units is closest to the web's penumbra
+  (2048, 8192, 16 or 40 units were all further off).
+- **13:** `shadow_normal_bias` 1.0 darkened lit faces about 1.5%; 2.0 removes it.
+- **3, 8, 9:** fill and fog are mixed inside `light()`; linear colours go in as `Vector3`.
+- **14:** the accent ring has a shader of its own.
 
 Also worth knowing: **three.js scales a normal map by the texture's stretch** (its tangent frame
 comes from screen derivatives, scaled by the longer axis), so a tile stretched 2:1 gets half the
 tilt on its long axis. The port does the same with `normal_scale` (0.5, 1.0) on the table; use it
 whenever a tile is stretched unevenly.
-
 ## Shaders
 
 `wood.gdshader` (every lit surface):
@@ -282,7 +278,7 @@ const T := 2.0                    # the demo's fixed frame time
 
 var wood_shader := preload("res://wood.gdshader")
 var ring_shader := preload("res://ring.gdshader")
-var font: SystemFont
+var font: FontFile
 var grain: ImageTexture
 var mats := {}
 
@@ -609,7 +605,7 @@ func build_env() -> void:
 
 **Paper cards on screen.** `card()` makes one rotated paper card; put `text()` labels (or a
 `VBoxContainer` of them) inside it, in a `CanvasLayer` at layer 2. Its `nudge` moved the glyphs to
-where Chrome puts them; leave it at 0. The demo's small caps are imitated with uppercase at 77% size
+where Chrome puts them; leave it at 0. The demo's small caps are imitated with uppercase at 70% size
 and letter spacing of 1 px on a `FontVariation`:
 
 ```gdscript
@@ -633,6 +629,9 @@ func text(s: String, size: int, line_h: float, center := false) -> Label:
 	l.add_theme_color_override("font_color", c("ink"))
 	var fh := font.get_height(size)
 	l.add_theme_constant_override("line_spacing", int(round(line_h - fh)))
+	var lead := StyleBoxEmpty.new()   # CSS half-leading above the first line and below the last
+	lead.content_margin_top = (line_h - fh) / 2.0; lead.content_margin_bottom = (line_h - fh) / 2.0
+	l.add_theme_stylebox_override("normal", lead)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if center: l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return l

@@ -2,7 +2,7 @@
 
 The frames are rendered from `demo.html` in its example palette (cold core), in an original
 setting: defending a data core from swarms in an arena. Everything is drawn in code (Canvas 2D);
-no image or model generator is used, and the page loads no assets.
+no image or model generator is used, and the page loads no assets but its bundled fonts.
 
 **How the glow is made:** every glowing line goes on two offscreen layers, a crisp one (colour core
 plus a near-white centre) and a bloom source (pure colour, a little wider, additive). The bloom

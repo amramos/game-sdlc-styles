@@ -10,18 +10,18 @@ const ROLE := {
 }
 const GRAIN: Texture2D = preload("res://art/paper-grain.png")
 const GRAIN_TILE := 512.0
-## Chrome places the serif title face's em box about 1 px higher than the normalised ascent below
-## gives (measured against the web frame; the lettering face needs no nudge).
-const TITLE_TOP_NUDGE := -1.0
+## Chrome places each face's em box a little lower than the normalised ascent below gives
+## (measured against the web frame, in em): the lettering by 0.04, the title by 0.02.
+const LET_TOP_NUDGE := 0.04
+const TIT_TOP_NUDGE := 0.02
 
-static var LET := _sys(["Comic Neue", "Comic Sans MS", "Chalkboard SE", "Segoe Print"], 700)
-static var LET_400 := _sys(["Comic Neue", "Comic Sans MS", "Chalkboard SE", "Segoe Print"], 400)
-static var TIT := _small_caps(_sys(["IM Fell English SC", "Georgia", "Times New Roman"], 700))
+static var LET := _face("res://fonts/ComicNeue-Bold.woff")
+static var LET_400 := _face("res://fonts/ComicNeue-Regular.woff")
+static var TIT := _small_caps(_face("res://fonts/Alegreya-Bold.woff"))
 
-static func _sys(names: Array, weight: int) -> SystemFont:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(names)
-	f.font_weight = weight
+## The same font files the web demo bundles, drawn like the browser draws them.
+static func _face(path: String) -> FontFile:
+	var f: FontFile = load(path)
 	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	f.hinting = TextServer.HINTING_NONE
 	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_ONE_QUARTER
@@ -254,7 +254,7 @@ static func text_w(text: String, fs: int, kind := "let") -> float:
 static func top_offset(fs: int, kind := "let") -> float:
 	var f := font_for(kind)
 	var a := f.get_ascent(fs); var d := f.get_descent(fs)
-	return fs * a / (a + d) + (TITLE_TOP_NUDGE if kind == "tit" else 0.0)
+	return fs * (a / (a + d) + (TIT_TOP_NUDGE if kind == "tit" else LET_TOP_NUDGE))
 
 ## Draws text with its em box top at y (canvas textBaseline = 'top').
 static func text_top(ci: CanvasItem, x: float, y: float, text: String, fs: int, col: Color, kind := "let") -> void:

@@ -1,21 +1,21 @@
 # Godot 4 port
 
-<!-- matched-web-frame: 31a8ad2bca70 -->
+<!-- matched-web-frame: 416363220717 -->
 
 **Test-rendered** in Godot 4.7.1 (Compatibility). `frames/godot-key-scene.*` rebuilds
 `demo.html?frame=key-scene`: the same printed pieces (this entry's own images), camera, lighting
 plot, card edges, shadows, flown placard, markers and pinned slip. Measured against
-`frames/key-scene.jpg`: mean difference 3.1 / 3.0 / 2.9 per 255 (RGB) for the delivered JPEG,
-4.3 / 3.6 / 4.0 for the lossless capture, and 1.5% of pixels differ by more than 24. The whole
+`frames/key-scene.jpg`: mean difference 3.0 / 3.0 / 2.8 per 255 (RGB) for the delivered JPEG,
+4.3 / 3.5 / 4.0 for the lossless capture, and 1.5% of pixels differ by more than 24. The whole
 project that rendered the frame, including the code that rebuilds the web demo exactly, is in this
 entry's `godot-port/` on the catalog site.
 
 What still differs: texture detail (Godot's anisotropic filtering keeps the hatching slightly
 crisper than WebGL's, and the web frame's JPEG smears colour), glyph rasterisation on the slip and
 placard, and dark tones that land one or two levels low in Compatibility (trap 6). Forward+ renders
-the same code to within 2/255 of Compatibility. The web frame itself has one flaw: at the far left
-and right below the stage, the floor's front face z-fights with the house wall in three.js; the
-port sets that face 0.001 behind the wall.
+the same code to within 2/255 of Compatibility. The floor's front face would sit in the house wall's
+plane and z-fight with it at the far left and right below the stage; the demo stops it 0.005
+behind the wall and the port 0.001 behind.
 
 ## How the look is built
 
@@ -44,12 +44,11 @@ port sets that face 0.001 behind the wall.
   paper edge, the hard card drop, a soft erf box shadow, a tack, then live text and icons. Slips
   are placed from the camera with `Camera3D.unproject_position()`. The flown placard is painted
   once into a 640×180 `SubViewport`, linearised, and used as its quad's texture with emission 0.35.
-- **Fonts.** The demo asks for Iowan Old Style, then Palatino Linotype; the port uses a
-  `SystemFont` with the same list. To ship, bundle a licensed copy or use TeX Gyre Pagella (free,
-  the same design). Small caps and old-style figures are the font's `smcp` and `onum` features via
-  `FontVariation.opentype_features`. (The port also places baselines from the font's OS/2 win
-  metrics, as Chrome does; Godot's own ascent sets lines about 3 px higher, which only matters when
-  matching the web.)
+- **Fonts.** The demo bundles EB Garamond (regular, bold, italic, bold italic) in `assets/fonts/`;
+  the port loads the same `.woff` files from `res://fonts/` as `FontFile`s (`garamond()` below).
+  Small caps and old-style figures are the font's `smcp` and `onum` features via
+  `FontVariation.opentype_features`. EB Garamond sets USE_TYPO_METRICS, so Chrome and Godot agree
+  on ascent and descent and the slip's baselines come from the font itself.
 
 ## Project and import settings
 
@@ -62,31 +61,17 @@ port sets that face 0.001 behind the wall.
 
 ## Compatibility traps
 
-Also from earlier ports: no Environment ambient with a shadowed light, mind which space sky and
-vertex colours are in, and writing `ALPHA` moves the material to the transparent pass.
+From `godot-compatibility.md` (copied beside this file): **1** (decode and encode under the Compatibility branch), **4** (`linearize.gdshader`
+decodes only under Compatibility), **15** (prints are mipmapped as half-float linear images,
+`linearize()`), **22** (`_solid()` unions a torn outline with an inner rectangle), and **3, 5, 6,
+8, 14** as every 3D entry. Particular to this look:
 
-1. **The base pass works in sRGB, untouched.** A `source_color` texture arrives in `fragment()`
-   undecoded, and `ALBEDO` (unshaded) or `EMISSION` reaches the screen unencoded: an emission of
-   0.214 shows as 54/255, not 128. Forward+ decodes and encodes both. Decode and encode yourself
-   under `#if CURRENT_RENDERER == RENDERER_COMPATIBILITY`.
-2. **Each shadowed spot or omni light is an additive pass that adds sRGB-encoded light.** Two
-   lights of 0.107 make 184/255 instead of 127, and the raw base pass plus a light pass mixes two
-   spaces. No per-pass correction works with two shadowed lights: render the shadow maps yourself
-   and light everything in one pass.
+1. **Two shadowed spot lights** (trap 10): no per-pass correction works, so the port renders the
+   shadow maps itself and lights everything in one pass.
+2. **Dark tones** (trap 7): `house` #241A1E lands at 34, 23, 28. The shadow maps store depth as
+   three 6-bit digits in codes 176–239, where codes come through exactly.
 3. **`spot_angle_attenuation` sharpens toward the centre.** Large values give a hot spot, not a
    flat cone. (Moot once the lighting is in the shader.)
-4. **Godot averages mipmaps in sRGB** (the importer and `Image.generate_mipmaps()` on 8-bit
-   images), so hatched prints darken as they shrink, in both renderers. Mipmap half-float linear
-   images instead.
-5. **An HDR 2D `SubViewport` in Compatibility still samples textures undecoded**, where Forward+
-   decodes them; `linearize.gdshader` decodes only under Compatibility.
-6. **Dark tones lose a level or two** (`house` #241A1E lands at 34, 23, 28): the 3D image passes
-   through an 8-bit linear buffer, whatever the HDR 2D and MSAA settings. Codes from 124 up come
-   through exactly, which is why the shadow maps store depth as three 6-bit digits in codes
-   176–239.
-7. **`draw_colored_polygon()` fails on an outline that crosses itself**, which a jittered torn
-   edge does at its corners; a canvas fill doesn't mind. Union it with an inner rectangle first
-   (`_solid()` below).
 
 ## Shaders
 
@@ -688,18 +673,17 @@ func _ready() -> void:
 	# interface: a slip pinned over the left pillar
 	var hud := CanvasLayer.new(); hud.layer = 2; add_child(hud)
 	var slip := Slip.new()
-	slip.regular = pala(400, false)
-	slip.bold_onum = pala(700, false, {"onum": 1})
-	slip.bold_smcp = pala(700, false, {"smcp": 1})
+	slip.regular = garamond(400, false)
+	slip.bold_onum = garamond(700, false, {"onum": 1})
+	slip.bold_smcp = garamond(700, false, {"smcp": 1})
 	var lx := camera.unproject_position(Vector3(-3.9 - 0.95, 0, 5)).x
 	slip.position = Vector2(roundf(lx - Slip.W * 0.5), 150)
 	hud.add_child(slip)
 
-func pala(weight: int, italic: bool, features := {}) -> Font:
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(["Palatino Linotype", "Palatino", "Book Antiqua", "TeX Gyre Pagella", "serif"])
-	f.font_weight = weight
-	f.font_italic = italic
+## The demo's own font files (assets/fonts/ on the web): EB Garamond in the weights the page uses.
+func garamond(weight: int, italic: bool, features := {}) -> Font:
+	var style := ("Bold" if weight >= 700 else "") + ("Italic" if italic else "")
+	var f: FontFile = load("res://fonts/EBGaramond-%s.woff" % (style if style else "Regular"))
 	if features.is_empty(): return f
 	var v := FontVariation.new()
 	v.base_font = f
@@ -716,7 +700,7 @@ func paint_placard(mat: ShaderMaterial) -> void:
 	sv.transparent_bg = true
 	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var p := Placard.new()
-	p.font = pala(700, true)
+	p.font = garamond(700, true)
 	sv.add_child(p)
 	add_child(sv)
 	await RenderingServer.frame_post_draw
@@ -868,9 +852,11 @@ func _draw() -> void:
 		draw_polyline(poly, paper, 1.0, true)             # antialiased cut edge
 	_stroke_rect(Rect2(22, 20, 576, 120), 3.0)
 	_stroke_rect(Rect2(30, 28, 560, 104), 1.2)
-	# canvas textAlign center, textBaseline middle at (310, 84)
+	# canvas textAlign center, textBaseline middle at (310, 84): Chrome's "middle" is the centre of
+	# the em box, the font's ascent and descent scaled so together they make one em
 	var size := 72
-	var base := 84.0 + (font.get_ascent(size) - font.get_descent(size)) * 0.5
+	var a := font.get_ascent(size); var d := font.get_descent(size)
+	var base := 84.0 + size * (a - d) / (a + d) * 0.5
 	draw_string(font, Vector2(310 - 400, base), title, HORIZONTAL_ALIGNMENT_CENTER, 800, size, ink)
 
 func _stroke_rect(r: Rect2, w: float) -> void:

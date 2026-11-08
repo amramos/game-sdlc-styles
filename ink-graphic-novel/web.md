@@ -99,9 +99,18 @@ ctx.fillStyle = P.paper; ctx.fillText(t, 0, 0);
 ```
 
 **Fonts:** a hand-lettered face for captions and a small-caps serif for titles, shipped with the
-game (`@font-face` from a local file, licence checked). The demo uses system fallbacks so it needs
-no network. Canvas text only draws once the font has loaded: `await document.fonts.load('20px X')`
-before the first frame.
+game (`@font-face` from a local file, licence checked). The demo bundles its own in `assets/fonts/`
+(Comic Neue, Alegreya, Arimo; all OFL) and loads them before the first canvas text draw:
+
+```css
+@font-face { font-family: "Comic Neue"; src: url(assets/fonts/ComicNeue-Bold.woff) format("woff"); font-weight: 700; }
+@font-face { font-family: "Alegreya"; src: url(assets/fonts/Alegreya-Bold.woff) format("woff"); font-weight: 700; }
+```
+
+```js
+await Promise.all(['700 16px "Comic Neue"', '400 16px "Comic Neue"', '700 16px "Alegreya"',
+  '400 16px Arimo'].map(f => document.fonts.load(f)));
+```
 
 **Ramp swap per chapter** on an `ImageData`, protecting the accent:
 

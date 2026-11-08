@@ -63,13 +63,10 @@ func _ready() -> void:
 	add_child(sh)
 	queue_redraw()
 
-## CSS line box: half-leading above the ascent. Chrome on Windows takes ascent and descent from
-## the font's OS/2 win metrics (Palatino Linotype: 2150 and 613 per 2048 em); Godot's own
-## get_ascent() uses the smaller hhea values and would set every line about 3 px high.
-const WIN_ASCENT := 2150.0 / 2048.0
-const WIN_DESCENT := 613.0 / 2048.0
-func _baseline(_f: Font, px: int, top: float, line_h: float) -> float:
-	var a := WIN_ASCENT * px; var d := WIN_DESCENT * px
+## CSS line box: half-leading above the ascent. EB Garamond sets USE_TYPO_METRICS, so Chrome and
+## Godot take the same ascent and descent from the font (1007 and 298 per 1000 em).
+func _baseline(f: Font, px: int, top: float, line_h: float) -> float:
+	var a := f.get_ascent(px); var d := f.get_descent(px)
 	return top + (line_h - (a + d)) * 0.5 + a
 
 func _draw() -> void:

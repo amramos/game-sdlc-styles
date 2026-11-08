@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cel-shaded 3D demo</title>
 <style>
+  /* Bundled faces (SIL OFL), so the page reads the same everywhere: Fredoka for display (titles,
+     names, decisive numbers), Nunito for body, Noto Sans Symbols 2 / Symbols for the chip icons and arrows, held to
+     Nunito's line height so a symbol never makes its line taller */
+  @font-face { font-family: "Fredoka"; src: url(assets/fonts/Fredoka-Variable.woff) format("woff"); font-weight: 300 700; }
+  @font-face { font-family: "Nunito"; src: url(assets/fonts/Nunito-Variable.woff) format("woff"); font-weight: 200 1000; }
+  @font-face { font-family: "Noto Sans Symbols 2"; src: url(assets/fonts/NotoSansSymbols2-Regular.woff) format("woff");
+    ascent-override: 100%; descent-override: 35%; line-gap-override: 0%; }
+  @font-face { font-family: "Noto Sans Symbols"; src: url(assets/fonts/NotoSansSymbols-Regular.woff) format("woff");
+    ascent-override: 100%; descent-override: 35%; line-gap-override: 0%; }
   :root {
     --ink: #24203A; --panel: #FFF8EA; --accent: #FF3FA0;
     --signal-wind: #7FDBFF; --signal-storm: #FF8C66; --signal-fragile: #FFE066; --signal-time: #8EE07A;
@@ -18,7 +27,7 @@
   /* Controls (free mode only) */
   #controls {
     position: fixed; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px;
-    max-width: calc(100vw - 24px); font: 700 14px "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    max-width: calc(100vw - 24px); font: 700 14px "Nunito", "Noto Sans Symbols 2", "Noto Sans Symbols", sans-serif;
   }
   #controls button, #controls a {
     background: var(--panel); color: var(--ink); border: 2px solid var(--ink); border-radius: 8px;
@@ -31,7 +40,7 @@
   /* Interface: same rules as the world. Flat fill, ink border, rounded, hard offset shadow.
      Sizes are for a 1280x720 viewport (2/3 of 1080p): 2 px border, 16 px minimum text. */
   .ui { position: fixed; inset: 0; pointer-events: none; display: none; color: var(--ink);
-        font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+        font-family: "Nunito", "Noto Sans Symbols 2", "Noto Sans Symbols", sans-serif; }
   .ui.show { display: block; }
   body.frame .ui { right: auto; bottom: auto; width: 1280px; height: 720px; }  /* frames: pinned 1280x720 */
   .panel { position: absolute; background: var(--panel); border: 2px solid var(--ink);
@@ -87,6 +96,9 @@
 
   #donttag { left: 16px; top: 16px; width: 520px; padding: 8px 12px; font-size: 16px; line-height: 21px; }
   #donttag b { font-size: 20px; }
+  /* display face: titles, names and decisive numbers (Fredoka's heaviest weight is 700) */
+  .display, #hud .nums b, #inv .slot span, #inv .tip b, #donttag b {
+    font-family: "Fredoka", "Nunito", "Noto Sans Symbols 2", sans-serif; font-weight: 700; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -539,6 +551,9 @@ scene.add(courier);
 const modelsReady = Promise.all([
   placeModel('courier', COURIER_SLOTS, { height: 1.75, line: 3, rim: true, tooMany: true, faceSlot: 0 }).then((m) => courier.add(m)),
   placeModel('windmill', WINDMILL_SLOTS, { height: 6.4, line: 2.5 }).then((m) => windmill.add(m)),
+  // the bundled faces, loaded before a frame is marked ready
+  ...['700 16px "Fredoka"', '400 16px "Nunito"', '700 16px "Nunito"', '800 16px "Nunito"', '900 16px "Nunito"',
+      '16px "Noto Sans Symbols 2"', '16px "Noto Sans Symbols"'].map((f) => document.fonts.load(f, f.includes('Symbols 2') ? '▶' : (f.includes('Symbols') ? '→' : 'a'))),
 ]);
 
 // ---------- Prop frame object: one delivery crate ----------

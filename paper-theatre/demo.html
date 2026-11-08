@@ -5,10 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paper theatre demo</title>
 <style>
+  @font-face { font-family:"EB Garamond"; src:url(assets/fonts/EBGaramond-Regular.woff) format("woff"); font-weight:400; font-style:normal; }
+  @font-face { font-family:"EB Garamond"; src:url(assets/fonts/EBGaramond-Bold.woff) format("woff"); font-weight:700; font-style:normal; }
+  @font-face { font-family:"EB Garamond"; src:url(assets/fonts/EBGaramond-Italic.woff) format("woff"); font-weight:400; font-style:italic; }
+  @font-face { font-family:"EB Garamond"; src:url(assets/fonts/EBGaramond-BoldItalic.woff) format("woff"); font-weight:700; font-style:italic; }
+  /* the check mark on the chips: EB Garamond has none */
+  @font-face { font-family:"Noto Sans Math"; src:url(assets/fonts/NotoSansMath-Marks.woff) format("woff"); unicode-range:U+2713; }
   :root { --ink:#2B2118; --paper:#F3EAD2; --card:#5A3E2B; --house:#241A1E; --accent:#0FA3D6;
           --signal-good:#226E2F; --signal-bad:#9C2A1E; --signal-info:#5B3A8C; }
   html, body { margin:0; height:100%; overflow:hidden; background:var(--house); }
-  body { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; color:var(--ink); }
+  body { font-family: "EB Garamond", "Noto Sans Math", serif; color:var(--ink); }
   canvas#c { display:block; position:absolute; left:0; top:0; }
   body.frame canvas#c { position:fixed; left:0; top:0; width:1280px !important; height:720px !important; }
   body.dont canvas#c { filter:saturate(2.3) contrast(1.15); }
@@ -301,8 +307,9 @@ function build() {
 
   // stage floor: the plank print, mirrored so it tiles without a seam
   const ft = TEX.floor; ft.wrapS = ft.wrapT = THREE.MirroredRepeatWrapping; ft.repeat.set(20 / 2.6, 15 / 2.6);
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(20, 0.3, 15), new THREE.MeshStandardMaterial({ map: ft, roughness: 0.9 }));
-  floor.position.set(0, FLOOR - 0.15, -2.6); floor.receiveShadow = true; scene.add(floor);
+  // its front face stops 0.005 behind the house wall (z 4.9): coplanar faces z-fight along the lip
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(20, 0.3, 14.995), new THREE.MeshStandardMaterial({ map: ft, roughness: 0.9 }));
+  floor.position.set(0, FLOOR - 0.15, -2.6 - 0.0025); floor.receiveShadow = true; scene.add(floor);
 
   // back cloth: one printed sheet, not cut
   // 26 wide: the print at its own scale in the middle, mirrored out at the sides the wings hide
@@ -367,7 +374,7 @@ function build() {
     for (let x = 620; x >= 0; x -= 20) g.lineTo(x, 160 - rnd() * 5); for (let y = 160; y >= 0; y -= 20) g.lineTo(rnd() * 5, y); g.fill();
     g.strokeStyle = P.ink; g.lineWidth = 3; g.strokeRect(22, 20, 576, 120); g.lineWidth = 1.2; g.strokeRect(30, 28, 560, 104);
     g.fillStyle = P.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = 'italic 700 72px "Iowan Old Style", "Palatino Linotype", Georgia, serif'; g.fillText('The Birch Wood', 310, 84);
+    g.font = 'italic 700 72px "EB Garamond", serif'; g.fillText('The Birch Wood', 310, 84);
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
     const mat = DONT ? new THREE.MeshBasicMaterial({ map: t }) : new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.35 });
     placard = new THREE.Mesh(new THREE.PlaneGeometry(2.56, 0.72), mat); placard.position.set(0, TOP - 1.25, 3.6); scene.add(placard);
@@ -537,6 +544,9 @@ if (!FRAME) {
 
 // ---------- start: build once every image has loaded ----------
 manager.onLoad = async () => {
+  // the bundled faces, loaded before the placard is printed and the slips are measured
+  if (document.fonts) await Promise.all(['400 16px "EB Garamond"', '700 16px "EB Garamond"', 'italic 400 16px "EB Garamond"',
+    'italic 700 16px "EB Garamond"', '16px "Noto Sans Math"'].map(f => document.fonts.load(f, f.includes('Math') ? '✓' : 'a')));
   build(); applyMood();
   if (document.fonts) await document.fonts.ready;
   if (FRAME) setupFrame(FRAME); else showHud(false);

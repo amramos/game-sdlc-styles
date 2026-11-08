@@ -87,8 +87,17 @@ function requestFlash(alpha) {
 to `requestAnimationFrame` on input, and stop on `visibilitychange` when hidden.
 
 **HUD:** draw last in its own pass with the tight `BLOOM.hud`, no panels, over a void fade from the
-top edge (`createLinearGradient`, void at 0.85 to 0 over 112 px). System fonts are fine for a
-prototype (`ui-monospace, Consolas, monospace` for numbers; `ctx.letterSpacing` for labels).
+top edge (`createLinearGradient`, void at 0.85 to 0 over 112 px); `ctx.letterSpacing` for labels.
+The demo bundles its fonts in `assets/fonts/` (Open Sans for words, Cascadia Mono for numbers) and
+loads every face before the first word is drawn, since a canvas doesn't redraw when a font arrives:
+
+```js
+// CSS: @font-face { font-family: "Cascadia Mono"; src: url(assets/fonts/CascadiaMono-Bold.woff) format("woff"); font-weight: 700; }
+const F_BODY = '"Open Sans", sans-serif', F_NUM = '"Cascadia Mono", monospace';
+await Promise.all(['400 16px "Open Sans"', '700 16px "Cascadia Mono"' /* … each face used */]
+  .map(f => document.fonts.load(f)));
+```
+
 Captures for the catalog are PNG; save them with `optimize=True`, since bloom gradients compress
 worse than flat lines.
 
